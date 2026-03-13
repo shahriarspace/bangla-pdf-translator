@@ -1,0 +1,205 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import type { Catalog, BookEntry } from '../../../types';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+export function getStaticPaths() {
+  const catalogPath = join(process.cwd(), 'library', 'catalog.json');
+  let catalog: Catalog = { books: [] };
+  try {
+    catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+  } catch {
+    return [];
+  }
+
+  return catalog.books.map(book => ({
+    params: { slug: book.slug },
+    props: { book },
+  }));
+}
+
+const { book } = Astro.props as { book: BookEntry };
+const base = import.meta.env.BASE_URL;
+const isTranslated = book.status === 'translated';
+
+// Check if HTML content exists for inline reading
+let htmlContent = '';
+if (isTranslated && book.files?.translated_html) {
+  const htmlPath = join(process.cwd(), 'library', book.slug, book.files.translated_html);
+  if (existsSync(htmlPath)) {
+    htmlContent = readFileSync(htmlPath, 'utf-8');
+  }
+}
+---
+
+<BaseLayout title={book.title}>
+  <div class="book-detail">
+    <a href={`${base}books/`} class="back-link">&larr; Back to Library</a>
+
+    <div class="book-header">
+      <div>
+        <span class={`status status-${book.status}`}>{book.status}</span>
+        <h1>{book.title}</h1>
+        {book.title_bangla && <p class="bangla-title">{book.title_bangla}</p>}
+        {book.author && <p class="book-author">by {book.author}</p>}
+      </div>
+    </div>
+
+    <div class="book-info grid grid-2">
+      <div class="card">
+        <h3>Details</h3>
+        <dl class="detail-list">
+          {book.page_count && (
+            <>
+              <dt>Pages</dt>
+              <dd>{book.page_count}</dd>
+            </>
+          )}
+          {book.category && (
+            <>
+              <dt>Category</dt>
+              <dd>{book.category}</dd>
+            </>
+          )}
+          <dt>Added</dt>
+          <dd>{new Date(book.date_added).toLocaleDateString()}</dd>
+          {book.date_translated && (
+            <>
+              <dt>Translated</dt>
+              <dd>{new Date(book.date_translated).toLocaleDateString()}</dd>
+            </>
+          )}
+          {book.translation_mode && (
+            <>
+              <dt>Translation</dt>
+              <dd>{book.translation_mode}</dd>
+            </>
+          )}
+          {book.refinement_provider && book.refinement_provider !== 'none' && (
+            <>
+              <dt>AI Refinement</dt>
+              <dd>{book.refinement_provider} ({book.refinement_model || 'default'})</dd>
+            </>
+          )}
+        </dl>
+        {book.tags && book.tags.length > 0 && (
+          <div class="book-tags">
+            {book.tags.map(t => <span class="tag">{t}</span>)}
+          </div>
+        )}
+      </div>
+
+      {isTranslated && (
+        <div class="card">
+          <h3>Downloads</h3>
+          <div class="download-buttons">
+            {book.files?.translated_html && (
+              <a
+                href={`${base}library/${book.slug}/${book.files.translated_html}`}
+                class="btn btn-primary"
+                download
+              >
+                HTML
+              </a>
+            )}
+            {book.files?.translated_pdf && (
+              <a
+                href={`${base}library/${book.slug}/${book.files.translated_pdf}`}
+                class="btn btn-primary"
+                download
+              >
+                PDF
+              </a>
+            )}
+            {book.files?.translated_adoc && (
+              <a
+                href={`${base}library/${book.slug}/${book.files.translated_adoc}`}
+                class="btn btn-outline"
+                download
+              >
+                AsciiDoc
+              </a>
+            )}
+            {book.files?.original_pdf && (
+              <a
+                href={`${base}library/${book.slug}/${book.files.original_pdf}`}
+                class="btn btn-outline"
+                download
+              >
+                Original PDF
+              </a>
+            )}
+          </div>
+          {htmlContent && (
+            <a href={`${base}books/${book.slug}/read/`} class="btn btn-green read-btn">
+              Read Online
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .book-detail {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .back-link {
+    display: inline-block;
+    margin-bottom: 1.5rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+  .back-link:hover {
+    color: var(--accent);
+  }
+  .book-header {
+    margin-bottom: 2rem;
+  }
+  .book-header h1 {
+    font-size: 2rem;
+    margin-top: 0.5rem;
+  }
+  .bangla-title {
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+  }
+  .book-author {
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+  }
+  .detail-list {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.5rem 1.5rem;
+    margin-top: 1rem;
+  }
+  .detail-list dt {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+  .detail-list dd {
+    font-size: 0.95rem;
+  }
+  .book-tags {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+  }
+  .download-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  .read-btn {
+    display: block;
+    text-align: center;
+    margin-top: 1rem;
+  }
+</style>

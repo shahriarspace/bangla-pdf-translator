@@ -1,0 +1,98 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import type { Catalog } from '../../types';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const catalogPath = join(process.cwd(), 'library', 'catalog.json');
+let catalog: Catalog = { books: [] };
+try {
+  catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+} catch {
+  // empty
+}
+
+const books = catalog.books;
+const base = import.meta.env.BASE_URL;
+---
+
+<BaseLayout title="Browse Books">
+  <div class="section-header">
+    <h1>Browse Library</h1>
+    <p>{books.length} book{books.length !== 1 ? 's' : ''} in the collection</p>
+  </div>
+
+  {books.length === 0 ? (
+    <div class="empty-state">
+      <p>No books in the library yet. <a href={`${base}upload/`}>Upload one</a> to get started.</p>
+    </div>
+  ) : (
+    <div class="grid grid-2">
+      {books.map(book => (
+        <a href={`${base}books/${book.slug}/`} class="card book-card">
+          <div class="book-card-top">
+            <span class={`status status-${book.status}`}>{book.status}</span>
+            {book.category && <span class="tag">{book.category}</span>}
+          </div>
+          <h3>{book.title}</h3>
+          {book.title_bangla && <p class="bangla-title">{book.title_bangla}</p>}
+          {book.author && <p class="book-author">by {book.author}</p>}
+          <div class="book-meta">
+            {book.page_count && <span>{book.page_count} pages</span>}
+            <span>{new Date(book.date_added).toLocaleDateString()}</span>
+          </div>
+          {book.tags && book.tags.length > 0 && (
+            <div class="book-tags">
+              {book.tags.map(t => <span class="tag">{t}</span>)}
+            </div>
+          )}
+        </a>
+      ))}
+    </div>
+  )}
+</BaseLayout>
+
+<style>
+  .book-card {
+    display: block;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .book-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  .book-card h3 {
+    font-size: 1.15rem;
+    margin-bottom: 0.3rem;
+  }
+  .bangla-title {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+  .book-author {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 0.3rem;
+  }
+  .book-meta {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.8rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .book-tags {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-top: 0.7rem;
+  }
+  .empty-state {
+    text-align: center;
+    padding: 4rem;
+    color: var(--text-muted);
+  }
+</style>

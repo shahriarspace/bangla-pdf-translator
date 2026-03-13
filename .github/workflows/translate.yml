@@ -1,0 +1,142 @@
+# translate.yml — Triggered by workflow_dispatch from the web UI
+#
+# This workflow:
+# 1. Downloads a Bangla PDF from a GitHub Release asset
+# 2. Installs OCR (Tesseract) and translation tools (Argos Translate)
+# 3. Runs the translation pipeline (extract → translate → generate)
+# 4. Commits results to library/{slug}/ and updates catalog.json
+# 5. Triggers the deploy workflow to rebuild the Astro site
+
+name: Translate Book
+
+on:
+  workflow_dispatch:
+    inputs:
+      pdf_filename:
+        description: 'Original PDF filename'
+        required: true
+        type: string
+      slug:
+        description: 'Book slug (directory name in library/)'
+        required: true
+        type: string
+      release_id:
+        description: 'GitHub Release ID containing the PDF'
+        required: true
+        type: string
+      asset_download_url:
+        description: 'Direct download URL for the PDF asset'
+        required: true
+        type: string
+      translation_mode:
+        description: 'Translation engine: offline (Argos) or online (Google)'
+        required: false
+        default: 'offline'
+        type: string
+      refinement_provider:
+        description: 'AI refinement: none, github, or openai'
+        required: false
+        default: 'none'
+        type: string
+      refinement_model:
+        description: 'AI model name override'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  translate:
+    name: Translate PDF
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr \
+            tesseract-ocr-ben \
+            tesseract-ocr-eng \
+            ruby
+          # Install asciidoctor for HTML/PDF generation
+          sudo gem install asciidoctor --no-document
+          # Verify
+          tesseract --version
+          tesseract --list-langs
+          asciidoctor --version
+
+      - name: Install CPU-only PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install Python dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Download and install Argos Translate model
+        if: inputs.translation_mode == 'offline' || inputs.translation_mode == 'hybrid'
+        run: |
+          python -c "
+          import argostranslate.package
+          argostranslate.package.update_package_index()
+          pkgs = argostranslate.package.get_available_packages()
+          bn_en = next(p for p in pkgs if p.from_code == 'bn' and p.to_code == 'en')
+          argostranslate.package.install_from_path(bn_en.download())
+          print('Argos bn->en model installed')
+          "
+
+      - name: Run translation pipeline
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python backend/translate_book.py \
+            --slug "${{ inputs.slug }}" \
+            --pdf-url "${{ inputs.asset_download_url }}" \
+            --filename "${{ inputs.pdf_filename }}" \
+            --mode "${{ inputs.translation_mode }}" \
+            --refinement "${{ inputs.refinement_provider }}" \
+            --model "${{ inputs.refinement_model }}"
+
+      - name: Copy translated files to public directory
+        run: |
+          # Astro needs library files accessible at build time and served statically
+          mkdir -p "public/library/${{ inputs.slug }}"
+          cp -r "library/${{ inputs.slug }}/"* "public/library/${{ inputs.slug }}/"
+
+      - name: Commit results to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "library/${{ inputs.slug }}/" "library/catalog.json" "public/library/${{ inputs.slug }}/"
+          git commit -m "Add translated book: ${{ inputs.slug }}"
+          git push
+
+      - name: Clean up draft release
+        if: always()
+        run: |
+          # Delete the draft release used for upload
+          curl -s -X DELETE \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/${{ inputs.release_id }}" \
+            || true
+
+      - name: Trigger site rebuild
+        if: success()
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches" \
+            -d '{"ref":"main"}'

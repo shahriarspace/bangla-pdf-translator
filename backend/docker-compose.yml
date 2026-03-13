@@ -1,0 +1,17 @@
+services:
+  web:
+    build: .
+    image: bangla-pdf-to-eng:latest
+    container_name: bangla-translator-web
+    ports:
+      - "8501:8000"
+    volumes:
+      # Persist jobs data between restarts
+      - ./jobs:/app/jobs
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      - OCR_ENGINE=tesseract
+      - TESSERACT_PATH=/usr/bin/tesseract
+    restart: unless-stopped

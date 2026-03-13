@@ -1,0 +1,167 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import type { Catalog } from '../types';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const catalogPath = join(process.cwd(), 'library', 'catalog.json');
+let catalog: Catalog = { books: [] };
+try {
+  catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+} catch {
+  // No catalog yet — empty library
+}
+
+const translated = catalog.books.filter(b => b.status === 'translated');
+const processing = catalog.books.filter(b => b.status === 'processing');
+const total = catalog.books.length;
+const base = import.meta.env.BASE_URL;
+---
+
+<BaseLayout title="Home">
+  <section class="hero">
+    <h1>Bangla Library</h1>
+    <p>Bangla books translated to English using OCR and machine translation. Upload a PDF, and GitHub Actions will process it automatically.</p>
+
+    <div class="stats">
+      <div class="stat">
+        <span class="stat-number">{total}</span>
+        <span class="stat-label">Total Books</span>
+      </div>
+      <div class="stat">
+        <span class="stat-number">{translated.length}</span>
+        <span class="stat-label">Translated</span>
+      </div>
+      <div class="stat">
+        <span class="stat-number">{processing.length}</span>
+        <span class="stat-label">Processing</span>
+      </div>
+    </div>
+
+    <div class="cta-buttons">
+      <a href={`${base}books/`} class="btn btn-primary">Browse Library</a>
+      <a href={`${base}upload/`} class="btn btn-green">Upload Book</a>
+    </div>
+  </section>
+
+  {translated.length > 0 && (
+    <section class="recent-section">
+      <div class="section-header">
+        <h2>Recently Translated</h2>
+      </div>
+      <div class="grid grid-3">
+        {translated.slice(0, 6).map(book => (
+          <a href={`${base}books/${book.slug}/`} class="card book-card">
+            <div class="book-card-header">
+              <span class="status status-translated">Translated</span>
+            </div>
+            <h3>{book.title}</h3>
+            {book.title_bangla && <p class="bangla-title">{book.title_bangla}</p>}
+            {book.author && <p class="book-author">{book.author}</p>}
+            <div class="book-meta">
+              {book.page_count && <span>{book.page_count} pages</span>}
+              {book.category && <span class="tag">{book.category}</span>}
+            </div>
+          </a>
+        ))}
+      </div>
+    </section>
+  )}
+
+  {total === 0 && (
+    <section class="empty-state">
+      <div class="empty-icon">&#128218;</div>
+      <h2>No books yet</h2>
+      <p>Upload your first Bangla PDF to get started.</p>
+      <a href={`${base}upload/`} class="btn btn-primary">Upload a Book</a>
+    </section>
+  )}
+</BaseLayout>
+
+<style>
+  .hero {
+    text-align: center;
+    padding: 3rem 0;
+  }
+  .hero h1 {
+    font-size: 2.8rem;
+    margin-bottom: 1rem;
+  }
+  .hero p {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    max-width: 600px;
+    margin: 0 auto 2rem;
+  }
+  .stats {
+    display: flex;
+    justify-content: center;
+    gap: 3rem;
+    margin-bottom: 2rem;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .stat-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .cta-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+  }
+  .recent-section {
+    margin-top: 3rem;
+  }
+  .book-card {
+    display: block;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .book-card h3 {
+    font-size: 1.1rem;
+    margin: 0.5rem 0 0.3rem;
+  }
+  .bangla-title {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+  .book-author {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 0.3rem;
+  }
+  .book-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .empty-state {
+    text-align: center;
+    padding: 4rem 0;
+  }
+  .empty-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+  }
+  .empty-state h2 {
+    margin-bottom: 0.5rem;
+  }
+  .empty-state p {
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+  }
+</style>

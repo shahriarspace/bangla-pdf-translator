@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# Build output
+dist/
+.astro/
+
+# Runtime files (generated during translation jobs)
+uploads/
+jobs/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Python virtual env
+venv/
+.venv/
+
+# Argos Translate model cache (downloaded at runtime in Actions)
+.local/

@@ -1,0 +1,22 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import UploadForm from '../../components/UploadForm.svelte';
+---
+
+<BaseLayout title="Upload & Translate">
+  <div class="upload-page">
+    <div class="section-header">
+      <h1>Upload a Bangla PDF</h1>
+      <p>Upload a PDF book in Bangla. A GitHub Actions workflow will process it: extract text via OCR, translate to English, and add it to the library.</p>
+    </div>
+
+    <UploadForm client:load />
+  </div>
+</BaseLayout>
+
+<style>
+  .upload-page {
+    max-width: 700px;
+    margin: 0 auto;
+  }
+</style>

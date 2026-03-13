@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bangla PDF to English Book</title>
+<style>
+  :root {
+    --bg: #0f0f13;
+    --card: #1a1a24;
+    --card-hover: #22222e;
+    --text: #e4e4e7;
+    --muted: #8b8b9a;
+    --accent: #6c63ff;
+    --accent2: #5a52d9;
+    --green: #22c55e;
+    --green2: #16a34a;
+    --border: #2a2a3a;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .container {
+    max-width: 760px;
+    width: 100%;
+  }
+  h1 {
+    font-size: 1.8rem;
+    text-align: center;
+    margin-bottom: 0.5rem;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+
+  /* ── Cards ───────────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .card h2 {
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+
+  /* ── Drop zone ───────────────────────────── */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 1.5rem;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(108, 99, 255, 0.05);
+  }
+  .drop-zone.has-file {
+    border-color: var(--green);
+    background: rgba(34, 197, 94, 0.05);
+  }
+  .drop-zone .icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  .drop-zone .label { color: var(--muted); }
+  .file-info {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  .file-info .name { font-weight: 600; }
+  .file-info .size { color: var(--muted); font-size: 0.85rem; }
+
+  /* ── Toggle switch ───────────────────────── */
+  .toggle-group {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  .toggle-btn {
+    flex: 1;
+    padding: 0.6rem 1rem;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background 0.2s, color 0.2s;
+  }
+  .toggle-btn:not(:last-child) {
+    border-right: 1px solid var(--border);
+  }
+  .toggle-btn.active {
+    background: var(--accent);
+    color: white;
+  }
+
+  /* ── Select / Input ──────────────────────── */
+  .form-group {
+    margin-bottom: 1rem;
+  }
+  .form-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+  select, input[type="text"], input[type="password"] {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.9rem;
+    outline: none;
+  }
+  select:focus, input:focus {
+    border-color: var(--accent);
+  }
+
+  /* ── Buttons ─────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    text-decoration: none;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-green { background: var(--green); color: white; }
+  .btn-green:hover { background: var(--green2); }
+  .btn-outline {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-full { width: 100%; }
+
+  /* ── Pipeline steps ──────────────────────── */
+  .pipeline {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .pipeline-step {
+    flex: 1;
+    text-align: center;
+    padding: 0.8rem 0.5rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    transition: border-color 0.3s, color 0.3s;
+  }
+  .pipeline-step.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .pipeline-step.done {
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .pipeline-step .step-icon { font-size: 1.2rem; display: block; margin-bottom: 0.3rem; }
+
+  /* ── Progress ────────────────────────────── */
+  .progress-section { display: none; }
+  .progress-section.visible { display: block; }
+  .progress-bar-container {
+    background: var(--card);
+    border-radius: 999px;
+    height: 8px;
+    overflow: hidden;
+    margin: 1rem 0;
+  }
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.3s;
+    width: 0%;
+  }
+  .progress-text {
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  /* ── Results ─────────────────────────────── */
+  .results-section { display: none; }
+  .results-section.visible { display: block; }
+  .download-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.8rem;
+    margin-top: 1rem;
+  }
+  .download-grid .btn { justify-content: center; }
+
+  /* ── Preview ─────────────────────────────── */
+  .preview-section { display: none; }
+  .preview-section.visible { display: block; }
+  .preview-content {
+    background: #111118;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: #c0c0cc;
+  }
+
+  /* ── Error ───────────────────────────────── */
+  .error-msg {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+    padding: 0.8rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    display: none;
+  }
+  .error-msg.visible { display: block; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Bangla PDF to English Book</h1>
+  <p class="subtitle">Upload a Bangla PDF. Get back AsciiDoc, HTML, and PDF translations.</p>
+
+  <!-- Error message -->
+  <div id="error-msg" class="error-msg"></div>
+
+  <!-- Upload section -->
+  <div id="upload-section">
+    <!-- Drop zone -->
+    <div id="drop-zone" class="drop-zone">
+      <input type="file" id="file-input" accept=".pdf" hidden>
+      <div id="drop-prompt">
+        <div class="icon">&#128228;</div>
+        <div class="label">Drop a Bangla PDF here or click to browse</div>
+      </div>
+      <div id="file-display" class="file-info" style="display:none">
+        <span style="font-size:1.5rem">&#128196;</span>
+        <span class="name" id="file-name"></span>
+        <span class="size" id="file-size"></span>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div class="card">
+      <h2>Translation Options</h2>
+
+      <!-- Translation mode toggle -->
+      <div class="form-group">
+        <label>Translation Engine</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" data-mode="offline" onclick="setMode(this)">Offline (Argos)</button>
+          <button class="toggle-btn" data-mode="online" onclick="setMode(this)">Online (Google)</button>
+        </div>
+      </div>
+
+      <!-- AI Refinement -->
+      <div class="form-group">
+        <label>AI Refinement</label>
+        <select id="refinement-provider" onchange="toggleModelPicker()">
+          <option value="none">None</option>
+          <option value="github">GitHub Models</option>
+          <option value="openai">OpenAI</option>
+        </select>
+      </div>
+
+      <!-- Model picker (shown when refinement is selected) -->
+      <div class="form-group hidden" id="model-picker">
+        <label>Model</label>
+        <select id="refinement-model">
+          <option value="gpt-4o-mini">GPT-4o Mini (default)</option>
+          <option value="gpt-4o">GPT-4o (best quality)</option>
+          <option value="o3-mini">o3-mini</option>
+          <option value="DeepSeek-R1">DeepSeek R1</option>
+          <option value="Mistral-Large-2411">Mistral Large</option>
+          <option value="Meta-Llama-3.1-405B-Instruct">Llama 3.1 405B</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Submit button -->
+    <button id="submit-btn" class="btn btn-green btn-full" disabled onclick="submitPDF()">
+      Translate
+    </button>
+  </div>
+
+  <!-- Pipeline visualization -->
+  <div id="pipeline" class="pipeline" style="display:none">
+    <div class="pipeline-step" id="step-extract">
+      <span class="step-icon">&#128196;</span>
+      Extract
+    </div>
+    <div class="pipeline-step" id="step-translate">
+      <span class="step-icon">&#127760;</span>
+      Translate
+    </div>
+    <div class="pipeline-step" id="step-generate">
+      <span class="step-icon">&#9997;</span>
+      Generate
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div id="progress-section" class="progress-section">
+    <div class="card">
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <div class="progress-text" id="progress-text">Starting...</div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results-section" class="results-section">
+    <div class="card">
+      <h2>Downloads</h2>
+      <a id="download-zip" class="btn btn-green btn-full" style="margin-bottom:0.8rem">
+        &#128230; Download All (ZIP)
+      </a>
+      <div class="download-grid">
+        <a id="download-adoc" class="btn btn-outline">AsciiDoc</a>
+        <a id="download-html" class="btn btn-outline">HTML</a>
+        <a id="download-pdf" class="btn btn-outline">PDF</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div id="preview-section" class="preview-section">
+    <div class="card">
+      <h2>Preview</h2>
+      <div class="preview-content" id="preview-content"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let selectedFile = null;
+  let translationMode = 'offline';
+
+  // ── Drop zone ──────────────────────────────────────
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+  });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f && f.name.toLowerCase().endsWith('.pdf')) selectFile(f);
+  });
+  fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) selectFile(e.target.files[0]);
+  });
+
+  function selectFile(f) {
+    selectedFile = f;
+    document.getElementById('drop-prompt').style.display = 'none';
+    document.getElementById('file-display').style.display = 'flex';
+    document.getElementById('file-name').textContent = f.name;
+    document.getElementById('file-size').textContent = `(${(f.size / 1024 / 1024).toFixed(1)} MB)`;
+    dropZone.classList.add('has-file');
+    document.getElementById('submit-btn').disabled = false;
+  }
+
+  // ── Translation mode toggle ────────────────────────
+  function setMode(btn) {
+    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    translationMode = btn.dataset.mode;
+  }
+
+  // ── Model picker visibility ────────────────────────
+  function toggleModelPicker() {
+    const provider = document.getElementById('refinement-provider').value;
+    document.getElementById('model-picker').classList.toggle('hidden', provider === 'none');
+  }
+
+  // ── Submit ─────────────────────────────────────────
+  async function submitPDF() {
+    if (!selectedFile) return;
+
+    const refinementProvider = document.getElementById('refinement-provider').value;
+    const refinementModel = document.getElementById('refinement-model').value;
+
+    // Build form data
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('translation_mode', translationMode);
+    formData.append('refinement_provider', refinementProvider);
+    formData.append('refinement_model', refinementProvider !== 'none' ? refinementModel : '');
+
+    // Hide upload, show pipeline + progress
+    document.getElementById('upload-section').style.display = 'none';
+    document.getElementById('pipeline').style.display = 'flex';
+    document.getElementById('progress-section').classList.add('visible');
+    document.getElementById('results-section').classList.remove('visible');
+    document.getElementById('preview-section').classList.remove('visible');
+    document.getElementById('error-msg').classList.remove('visible');
+
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Upload failed');
+      }
+      const { job_id } = await res.json();
+      listenProgress(job_id);
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  // ── SSE progress ───────────────────────────────────
+  function listenProgress(jobId) {
+    const es = new EventSource(`/api/jobs/${jobId}/progress`);
+
+    es.addEventListener('progress', e => {
+      const data = JSON.parse(e.data);
+      updateProgress(data);
+    });
+
+    es.addEventListener('complete', e => {
+      es.close();
+      const data = JSON.parse(e.data);
+      if (data.status === 'completed') {
+        showResults(data.downloads, jobId);
+      } else {
+        showError(data.error || 'Translation failed');
+      }
+    });
+
+    es.onerror = () => {
+      es.close();
+      showError('Connection lost. Check the server logs.');
+    };
+  }
+
+  function updateProgress(data) {
+    const pct = data.total_steps > 0 ? Math.round(data.progress / data.total_steps * 100) : 0;
+    document.getElementById('progress-bar').style.width = pct + '%';
+    document.getElementById('progress-text').textContent = data.current_step || 'Processing...';
+
+    // Update pipeline steps
+    const stepMap = {
+      extracting: 'step-extract',
+      translating: 'step-translate',
+      generating: 'step-generate',
+    };
+    const order = ['extracting', 'translating', 'generating'];
+    const currentIdx = order.indexOf(data.status);
+
+    order.forEach((s, i) => {
+      const el = document.getElementById(stepMap[s]);
+      el.classList.remove('active', 'done');
+      if (i < currentIdx) el.classList.add('done');
+      else if (i === currentIdx) el.classList.add('active');
+    });
+  }
+
+  function showResults(downloads, jobId) {
+    // Mark all steps done
+    ['step-extract', 'step-translate', 'step-generate'].forEach(id => {
+      const el = document.getElementById(id);
+      el.classList.remove('active');
+      el.classList.add('done');
+    });
+
+    document.getElementById('progress-section').classList.remove('visible');
+    document.getElementById('results-section').classList.add('visible');
+
+    // Set download links
+    document.getElementById('download-zip').href = downloads.zip;
+    document.getElementById('download-adoc').href = downloads.adoc;
+    document.getElementById('download-html').href = downloads.html;
+    document.getElementById('download-pdf').href = downloads.pdf;
+
+    // Load preview
+    fetch(`/api/jobs/${jobId}/preview`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.adoc_content) {
+          document.getElementById('preview-content').textContent = data.adoc_content;
+          document.getElementById('preview-section').classList.add('visible');
+        }
+      });
+  }
+
+  function showError(msg) {
+    document.getElementById('error-msg').textContent = msg;
+    document.getElementById('error-msg').classList.add('visible');
+    document.getElementById('upload-section').style.display = 'block';
+    document.getElementById('pipeline').style.display = 'none';
+    document.getElementById('progress-section').classList.remove('visible');
+  }
+</script>
+</body>
+</html>

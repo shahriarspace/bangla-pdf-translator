@@ -1,0 +1,109 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import type { Catalog, BookEntry } from '../../../types';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+export function getStaticPaths() {
+  const catalogPath = join(process.cwd(), 'library', 'catalog.json');
+  let catalog: Catalog = { books: [] };
+  try {
+    catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+  } catch {
+    return [];
+  }
+
+  // Only translated books with HTML files get a read page
+  return catalog.books
+    .filter(b => b.status === 'translated' && b.files?.translated_html)
+    .map(book => ({
+      params: { slug: book.slug },
+      props: { book },
+    }));
+}
+
+const { book } = Astro.props as { book: BookEntry };
+const base = import.meta.env.BASE_URL;
+
+// Read the translated HTML content
+let htmlContent = '';
+if (book.files?.translated_html) {
+  const htmlPath = join(process.cwd(), 'library', book.slug, book.files.translated_html);
+  if (existsSync(htmlPath)) {
+    htmlContent = readFileSync(htmlPath, 'utf-8');
+    // Extract just the body content if it's a full HTML doc
+    const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    if (bodyMatch) {
+      htmlContent = bodyMatch[1];
+    }
+  }
+}
+---
+
+<BaseLayout title={`Read: ${book.title}`}>
+  <div class="reader">
+    <div class="reader-toolbar">
+      <a href={`${base}books/${book.slug}/`} class="back-link">&larr; Back to {book.title}</a>
+      <div class="reader-actions">
+        {book.files?.translated_pdf && (
+          <a
+            href={`${base}library/${book.slug}/${book.files.translated_pdf}`}
+            class="btn btn-outline btn-sm"
+            download
+          >
+            Download PDF
+          </a>
+        )}
+      </div>
+    </div>
+
+    <article class="reader-content" set:html={htmlContent} />
+  </div>
+</BaseLayout>
+
+<style>
+  .reader {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  .reader-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .back-link {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+  .back-link:hover {
+    color: var(--accent);
+  }
+  .btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+  }
+  .reader-content {
+    font-family: Georgia, 'Times New Roman', serif;
+    line-height: 1.9;
+    color: #e0e0e0;
+  }
+  .reader-content :global(h1) {
+    font-size: 2rem;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .reader-content :global(h2) {
+    font-size: 1.5rem;
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    color: var(--accent);
+  }
+  .reader-content :global(p) {
+    margin-bottom: 1rem;
+    text-align: justify;
+  }
+</style>
