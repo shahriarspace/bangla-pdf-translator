@@ -15,13 +15,13 @@
   import { onMount } from 'svelte';
 
   // --- Configuration ---
-  // These are safe to expose publicly (client_id is not secret).
-  // TRIGGER_TOKEN is a minimal-scope PAT that can ONLY trigger workflows.
-  // Set these via Astro's env or replace with your values.
-  const OAUTH_CLIENT_ID = import.meta.env.PUBLIC_OAUTH_CLIENT_ID || 'YOUR_CLIENT_ID';
+  // OAUTH_CLIENT_ID is public (safe to commit — it's how OAuth works).
+  // TRIGGER_TOKEN is a minimal-scope PAT used to trigger the exchange workflow.
+  // Set as PUBLIC_TRIGGER_TOKEN repo variable → injected at build time by deploy.yml.
+  const OAUTH_CLIENT_ID = 'Ov23liyIIo3KzEvudut4';
   const TRIGGER_TOKEN = import.meta.env.PUBLIC_TRIGGER_TOKEN || '';
-  const DEFAULT_REPO_OWNER = import.meta.env.PUBLIC_REPO_OWNER || 'shahriarspace';
-  const DEFAULT_REPO_NAME = import.meta.env.PUBLIC_REPO_NAME || 'bangla-pdf-translator';
+  const DEFAULT_REPO_OWNER = 'shahriarspace';
+  const DEFAULT_REPO_NAME = 'bangla-pdf-translator';
 
   const STORAGE_KEY = 'bangla-translator-github';
   const OAUTH_STATE_KEY = 'bangla-translator-oauth-state';
@@ -82,7 +82,7 @@
   ];
 
   let needsAiSettings = $derived(ocrEngine === 'ai' || translationMode === 'ai');
-  let oauthAvailable = $derived(OAUTH_CLIENT_ID !== 'YOUR_CLIENT_ID' && TRIGGER_TOKEN !== '');
+  let oauthAvailable = $derived(TRIGGER_TOKEN !== '');
 
   // --- Lifecycle ---
 

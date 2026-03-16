@@ -47,6 +47,8 @@ jobs:
 
       - name: Build Astro site
         run: npm run build
+        env:
+          PUBLIC_TRIGGER_TOKEN: ${{ vars.PUBLIC_TRIGGER_TOKEN }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
