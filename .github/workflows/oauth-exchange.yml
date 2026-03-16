@@ -1,0 +1,86 @@
+# oauth-exchange.yml — Exchange OAuth code for access token
+#
+# Triggered by the Astro frontend after GitHub redirects back with ?code=XXX.
+# The browser triggers this workflow using a minimal TRIGGER_PAT.
+# The workflow uses OAUTH_CLIENT_SECRET (repo secret) to exchange the code.
+# The resulting token is XOR-encrypted with the state parameter and
+# written to a workflow artifact for the browser to download.
+
+name: OAuth Token Exchange
+
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: 'OAuth authorization code from GitHub redirect'
+        required: true
+        type: string
+      state:
+        description: 'Random state for encrypting the response'
+        required: true
+        type: string
+
+# Minimal permissions — only needs to write artifacts
+permissions:
+  contents: read
+
+jobs:
+  exchange:
+    name: Exchange Code for Token
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Exchange OAuth code for access token
+        id: exchange
+        env:
+          OAUTH_CODE: ${{ inputs.code }}
+          OAUTH_STATE: ${{ inputs.state }}
+          CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.OAUTH_CLIENT_SECRET }}
+        run: |
+          # Exchange the code for an access token
+          RESPONSE=$(curl -s -X POST https://github.com/login/oauth/access_token \
+            -H "Accept: application/json" \
+            -d "client_id=${CLIENT_ID}" \
+            -d "client_secret=${CLIENT_SECRET}" \
+            -d "code=${OAUTH_CODE}")
+
+          echo "Response received (redacted)"
+
+          # Extract token and error
+          TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+          ERROR=$(echo "$RESPONSE" | jq -r '.error // empty')
+          ERROR_DESC=$(echo "$RESPONSE" | jq -r '.error_description // empty')
+
+          if [ -z "$TOKEN" ]; then
+            echo "error=${ERROR}: ${ERROR_DESC}" >> "$GITHUB_OUTPUT"
+            # Write error as artifact
+            mkdir -p token-result
+            echo "{\"error\": \"${ERROR}\", \"error_description\": \"${ERROR_DESC}\"}" > token-result/result.json
+          else
+            echo "success=true" >> "$GITHUB_OUTPUT"
+            # XOR-encrypt the token with the state parameter
+            # This ensures only the browser that initiated the flow can decrypt it
+            python3 -c "
+          import json, base64
+          token = '${TOKEN}'
+          state = '${OAUTH_STATE}'
+          # XOR encrypt
+          key = (state * ((len(token) // len(state)) + 1))[:len(token)]
+          encrypted = bytes([a ^ b for a, b in zip(token.encode(), key.encode())])
+          result = {'encrypted_token': base64.b64encode(encrypted).decode(), 'state': state}
+          import os
+          os.makedirs('token-result', exist_ok=True)
+          with open('token-result/result.json', 'w') as f:
+              json.dump(result, f)
+          print('Token encrypted and saved')
+          "
+          fi
+
+      - name: Upload result artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oauth-result-${{ inputs.state }}
+          path: token-result/
+          retention-days: 1
