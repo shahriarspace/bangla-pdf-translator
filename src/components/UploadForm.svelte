@@ -46,6 +46,10 @@
   let aiOcrModel = $state('gpt-4o');
   let aiTranslateModel = $state('gpt-4o');
 
+  // Book metadata (optional)
+  let bookTitle = $state('');
+  let bookAuthor = $state('');
+
   // Auth state
   let githubToken = $state('');
   let githubUser = $state('');
@@ -564,6 +568,8 @@
               ai_provider: needsAiSettings ? aiProvider : 'github',
               ai_ocr_model: ocrEngine === 'ai' ? aiOcrModel : 'gpt-4o',
               ai_translate_model: translationMode === 'ai' ? aiTranslateModel : 'gpt-4o',
+              book_title: bookTitle.trim(),
+              book_author: bookAuthor.trim(),
             },
           }),
         }
@@ -767,6 +773,21 @@
     </div>
 
     <!-- Translation Options -->
+    <div class="options-section card">
+      <h3>Book Details (optional)</h3>
+      <p class="help-text">If left blank, the title and author will be extracted from the PDF metadata or derived from the filename.</p>
+      <div class="form-row">
+        <label>
+          <span>Book Title</span>
+          <input type="text" bind:value={bookTitle} placeholder="e.g. Moyurakkhi" />
+        </label>
+        <label>
+          <span>Author</span>
+          <input type="text" bind:value={bookAuthor} placeholder="e.g. Humayun Ahmed" />
+        </label>
+      </div>
+    </div>
+
     <div class="options-section card">
       <h3>OCR Engine</h3>
       <div class="option-group">

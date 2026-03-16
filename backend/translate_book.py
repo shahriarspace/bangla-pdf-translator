@@ -91,6 +91,8 @@ def update_catalog_entry(
     refinement_provider: str = "",
     refinement_model: str = "",
     files: dict | None = None,
+    title: str = "",
+    author: str = "",
 ) -> None:
     """Add or update a book entry in the catalog."""
     catalog = load_catalog()
@@ -99,20 +101,27 @@ def update_catalog_entry(
     # Find existing entry or create new one
     entry = next((b for b in catalog["books"] if b["slug"] == slug), None)
 
+    # Determine display title: explicit > PDF metadata > filename fallback
+    display_title = title or (
+        filename.replace(".pdf", "").replace("_", " ").replace("-", " ").title()
+    )
+
     if entry is None:
         entry = {
             "slug": slug,
-            "title": filename.replace(".pdf", "")
-            .replace("_", " ")
-            .replace("-", " ")
-            .title(),
+            "title": display_title,
             "status": status,
             "date_added": now,
         }
         catalog["books"].insert(0, entry)  # newest first
     else:
         entry["status"] = status
+        # Update title if we have a better one
+        if title:
+            entry["title"] = title
 
+    if author:
+        entry["author"] = author
     if page_count:
         entry["page_count"] = page_count
     if translation_mode:
@@ -132,6 +141,32 @@ def progress_callback(current: int, total: int, msg: str) -> None:
     """Print progress to stdout for GitHub Actions logs."""
     pct = int(current / total * 100) if total else 0
     print(f"  [{pct:3d}%] {msg}")
+
+
+def extract_pdf_metadata(pdf_path: Path) -> dict:
+    """Extract title and author from PDF metadata fields."""
+    metadata = {"title": "", "author": ""}
+    try:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(str(pdf_path))
+        pdf_meta = doc.metadata or {}
+        doc.close()
+
+        title = (pdf_meta.get("title") or "").strip()
+        author = (pdf_meta.get("author") or "").strip()
+
+        # Only use if they look real (not empty, not a filepath, not 'untitled')
+        if title and len(title) > 1 and not title.lower().startswith("untitled"):
+            metadata["title"] = title
+        if author and len(author) > 1:
+            metadata["author"] = author
+
+        logger.info(f"PDF metadata — title: {title!r}, author: {author!r}")
+    except Exception as e:
+        logger.warning(f"Could not read PDF metadata: {e}")
+
+    return metadata
 
 
 def main():
@@ -158,6 +193,16 @@ def main():
         "--refinement", default="none", choices=["none", "openai", "github"]
     )
     parser.add_argument("--model", default="", help="AI model name override")
+    parser.add_argument(
+        "--book-title",
+        default="",
+        help="Book title (optional, extracted from PDF if not provided)",
+    )
+    parser.add_argument(
+        "--book-author",
+        default="",
+        help="Book author (optional, extracted from PDF if not provided)",
+    )
     args = parser.parse_args()
 
     slug = args.slug
@@ -177,8 +222,27 @@ def main():
     else:
         logger.info(f"PDF already exists: {pdf_path}")
 
+    # Extract metadata from PDF (title, author)
+    pdf_meta = extract_pdf_metadata(pdf_path)
+    book_title = (
+        args.book_title
+        or pdf_meta["title"]
+        or (
+            args.filename.replace(".pdf", "")
+            .replace("_", " ")
+            .replace("-", " ")
+            .title()
+        )
+    )
+    book_author = args.book_author or pdf_meta["author"] or ""
+    print(f"  Book title: {book_title}")
+    if book_author:
+        print(f"  Book author: {book_author}")
+
     # Mark as processing in catalog
-    update_catalog_entry(slug, args.filename, status="processing")
+    update_catalog_entry(
+        slug, args.filename, status="processing", title=book_title, author=book_author
+    )
 
     try:
         # Step 1: Extract text
@@ -210,7 +274,8 @@ def main():
 
         stem = Path(args.filename).stem
         metadata = BookMetadata(
-            title=stem.replace("_", " ").replace("-", " ").title(),
+            title=book_title,
+            author=book_author or "Translated from Bangla",
             subtitle=f"Translated from Bangla ({book.total_pages} pages)",
         )
 
@@ -221,19 +286,29 @@ def main():
 
         html_filename = f"{stem}_english.html"
         html_path = asciidoc_to_html(adoc_path)
-        print(f"  HTML: {html_path}")
+        if html_path and html_path.exists():
+            print(f"  HTML: {html_path}")
+        else:
+            html_filename = ""
+            logger.warning("HTML generation failed — skipping")
 
         pdf_filename = f"{stem}_english.pdf"
         pdf_out_path = asciidoc_to_pdf(adoc_path)
-        print(f"  PDF: {pdf_out_path}")
+        if pdf_out_path and pdf_out_path.exists():
+            print(f"  PDF: {pdf_out_path}")
+        else:
+            pdf_filename = ""
+            logger.warning("PDF generation failed — skipping")
 
-        # Update catalog with success
+        # Update catalog with success — only include files that were actually generated
         files = {
             "original_pdf": args.filename,
             "translated_adoc": adoc_filename,
-            "translated_html": html_filename,
-            "translated_pdf": pdf_filename,
         }
+        if html_filename:
+            files["translated_html"] = html_filename
+        if pdf_filename:
+            files["translated_pdf"] = pdf_filename
 
         update_catalog_entry(
             slug=slug,
@@ -244,6 +319,8 @@ def main():
             refinement_provider=args.refinement,
             refinement_model=args.model,
             files=files,
+            title=book_title,
+            author=book_author,
         )
 
         print(f"\n=== Done! Book '{slug}' translated successfully ===")

@@ -8,6 +8,9 @@ __pycache__/
 dist/
 .astro/
 
+# Generated at deploy time (library/ files copied here before Astro build)
+public/library/
+
 # Runtime files (generated during translation jobs)
 uploads/
 jobs/

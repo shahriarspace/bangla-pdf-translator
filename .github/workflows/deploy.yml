@@ -45,6 +45,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Copy library files to public directory
+        run: |
+          # Copy translated book files so Astro serves them as static assets.
+          # This avoids committing duplicates in both library/ and public/library/.
+          if [ -d "library" ]; then
+            mkdir -p public/library
+            # Copy all book directories (skip catalog.json — only needed at build time)
+            for dir in library/*/; do
+              if [ -d "$dir" ]; then
+                slug=$(basename "$dir")
+                mkdir -p "public/library/$slug"
+                cp -r "$dir"* "public/library/$slug/" 2>/dev/null || true
+              fi
+            done
+            echo "Copied library files to public/library/"
+          fi
+
       - name: Build Astro site
         run: npm run build
         env:

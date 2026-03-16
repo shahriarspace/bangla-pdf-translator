@@ -60,6 +60,16 @@ on:
         required: false
         default: 'gpt-4o'
         type: string
+      book_title:
+        description: 'Book title (optional — extracted from PDF if not provided)'
+        required: false
+        default: ''
+        type: string
+      book_author:
+        description: 'Book author (optional — extracted from PDF if not provided)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -89,7 +99,7 @@ jobs:
             tesseract-ocr-eng \
             ruby
           # Install asciidoctor for HTML/PDF generation
-          sudo gem install asciidoctor --no-document
+          sudo gem install asciidoctor asciidoctor-pdf --no-document
           # Verify
           tesseract --version
           tesseract --list-langs
@@ -128,13 +138,9 @@ jobs:
             --mode "${{ inputs.translation_mode }}" \
             --ocr-engine "${{ inputs.ocr_engine }}" \
             --refinement "${{ inputs.refinement_provider }}" \
-            --model "${{ inputs.refinement_model }}"
-
-      - name: Copy translated files to public directory
-        run: |
-          # Astro needs library files accessible at build time and served statically
-          mkdir -p "public/library/${{ inputs.slug }}"
-          cp -r "library/${{ inputs.slug }}/"* "public/library/${{ inputs.slug }}/"
+            --model "${{ inputs.refinement_model }}" \
+            --book-title "${{ inputs.book_title }}" \
+            --book-author "${{ inputs.book_author }}"
 
       - name: Commit results to repository
         run: |
@@ -142,9 +148,48 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Remove the uploaded PDF (no longer needed)
           git rm -rf "uploads/${{ inputs.slug }}/" || true
-          git add "library/${{ inputs.slug }}/" "library/catalog.json" "public/library/${{ inputs.slug }}/"
+          git add "library/${{ inputs.slug }}/" "library/catalog.json"
           git commit -m "Add translated book: ${{ inputs.slug }}"
-          git push
+
+          # Push with retry logic for concurrent translations.
+          # If another translation pushed while we were running, pull --rebase
+          # and retry. catalog.json conflicts are resolved by re-adding ours.
+          MAX_RETRIES=3
+          for i in $(seq 1 $MAX_RETRIES); do
+            if git push; then
+              echo "Push succeeded on attempt $i"
+              break
+            fi
+            echo "Push failed (attempt $i/$MAX_RETRIES), pulling with rebase..."
+            git pull --rebase origin main || {
+              # If rebase conflicts on catalog.json, accept ours and re-merge
+              echo "Rebase conflict detected, resolving catalog.json..."
+              git checkout --theirs library/catalog.json 2>/dev/null || true
+              git add library/catalog.json
+              git rebase --continue || true
+              # Re-run our catalog update to merge entries
+              python -c "
+          import json
+          from pathlib import Path
+          catalog_path = Path('library/catalog.json')
+          catalog = json.loads(catalog_path.read_text())
+          slugs_seen = set()
+          deduped = []
+          for book in catalog['books']:
+              if book['slug'] not in slugs_seen:
+                  slugs_seen.add(book['slug'])
+                  deduped.append(book)
+          catalog['books'] = deduped
+          catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + '\n')
+          "
+              git add library/catalog.json
+              git commit --amend --no-edit
+            }
+            if [ "$i" -eq "$MAX_RETRIES" ]; then
+              echo "Failed to push after $MAX_RETRIES attempts"
+              exit 1
+            fi
+          done
 
       - name: Trigger site rebuild
         if: success()
