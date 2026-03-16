@@ -1,7 +1,7 @@
 import { defineConfig } from 'astro/config';
 import svelte from '@astrojs/svelte';
 
-// Astro configuration — https://docs.astro.build/en/reference/configuration-reference/
+// Astro config — https://docs.astro.build/en/reference/configuration-reference/
 export default defineConfig({
   integrations: [svelte()],
   output: 'static',
