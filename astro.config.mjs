@@ -5,7 +5,7 @@ export default defineConfig({
   integrations: [svelte()],
   output: 'static',
   site: 'https://shahriarspace.github.io',
-  base: '/bangla-pdf-translator',
+  base: '/bangla-pdf-translator/',
   build: {
     assets: '_assets',
   },
