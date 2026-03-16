@@ -4,14 +4,17 @@
    *
    * Interactive Svelte island for the upload page.
    * Flow:
-   * 1. User selects PDF + translation options
-   * 2. PDF is uploaded as a GitHub Release asset (via GitHub API)
-   * 3. A workflow_dispatch event triggers the translate.yml Action
-   * 4. User sees a "submitted" confirmation with link to check Actions status
-   *
-   * Requires a GitHub PAT with `repo` and `actions` scope, stored in
-   * the site config or entered by the user.
+   * 1. User connects their GitHub account (PAT stored in localStorage)
+   * 2. User selects PDF + translation options
+   * 3. PDF is uploaded as a GitHub Release asset (via GitHub API)
+   * 4. A workflow_dispatch event triggers the translate.yml Action
+   * 5. User sees a "submitted" confirmation with link to check Actions status
    */
+
+  import { onMount } from 'svelte';
+
+  const STORAGE_KEY = 'bangla-translator-github';
+  const PAT_CREATE_URL = 'https://github.com/settings/tokens/new?scopes=repo,workflow&description=Bangla+PDF+Translator';
 
   let file: File | null = $state(null);
   let dragOver = $state(false);
@@ -28,8 +31,15 @@
   let aiOcrModel = $state('gpt-4o');
   let aiTranslateModel = $state('gpt-4o');
 
-  // GitHub config — user provides these
+  // GitHub auth state
   let githubToken = $state('');
+  let githubUser = $state('');
+  let githubAvatar = $state('');
+  let authStatus: 'disconnected' | 'connecting' | 'connected' | 'error' = $state('disconnected');
+  let authError = $state('');
+  let tokenInput = $state('');
+
+  // Repo config
   let repoOwner = $state('');
   let repoName = $state('bangla-pdf-translator');
 
@@ -55,6 +65,94 @@
   ];
 
   let needsAiSettings = $derived(ocrEngine === 'ai' || translationMode === 'ai');
+
+  // --- Auth functions ---
+
+  onMount(() => {
+    // Restore saved session from localStorage
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data.token && data.user) {
+          githubToken = data.token;
+          githubUser = data.user;
+          githubAvatar = data.avatar || '';
+          repoOwner = data.repoOwner || data.user;
+          repoName = data.repoName || 'bangla-pdf-translator';
+          authStatus = 'connected';
+        }
+      }
+    } catch {
+      // ignore parse errors
+    }
+  });
+
+  function saveSession() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        token: githubToken,
+        user: githubUser,
+        avatar: githubAvatar,
+        repoOwner,
+        repoName,
+      }));
+    } catch {
+      // localStorage might be unavailable
+    }
+  }
+
+  async function connectGitHub() {
+    if (!tokenInput.trim()) return;
+
+    authStatus = 'connecting';
+    authError = '';
+
+    try {
+      // Validate token by fetching user info
+      const res = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization: `token ${tokenInput.trim()}`,
+          Accept: 'application/vnd.github.v3+json',
+        },
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('Invalid token. Please check and try again.');
+        }
+        throw new Error(`GitHub API error: ${res.status}`);
+      }
+
+      const user = await res.json();
+      githubToken = tokenInput.trim();
+      githubUser = user.login;
+      githubAvatar = user.avatar_url || '';
+      repoOwner = repoOwner || user.login;
+      authStatus = 'connected';
+      tokenInput = '';
+      saveSession();
+    } catch (e: any) {
+      authStatus = 'error';
+      authError = e.message || 'Failed to connect';
+    }
+  }
+
+  function disconnect() {
+    githubToken = '';
+    githubUser = '';
+    githubAvatar = '';
+    tokenInput = '';
+    authStatus = 'disconnected';
+    authError = '';
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  // --- Form functions ---
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();
@@ -195,24 +293,80 @@
     </div>
 
   {:else}
-    <!-- GitHub Config -->
+    <!-- GitHub Auth -->
     <div class="config-section card">
-      <h3>GitHub Configuration</h3>
-      <p class="help-text">A GitHub Personal Access Token (PAT) with <code>repo</code> scope is required to upload files and trigger workflows.</p>
-      <div class="form-row">
-        <label>
-          <span>GitHub Username / Org</span>
-          <input type="text" bind:value={repoOwner} placeholder="your-username" />
-        </label>
-        <label>
-          <span>Repository Name</span>
-          <input type="text" bind:value={repoName} placeholder="bangla-pdf-translator" />
-        </label>
-      </div>
-      <label>
-        <span>Personal Access Token</span>
-        <input type="password" bind:value={githubToken} placeholder="ghp_xxxxxxxxxxxx" />
-      </label>
+      {#if authStatus === 'connected'}
+        <div class="auth-connected">
+          <div class="auth-user">
+            {#if githubAvatar}
+              <img src={githubAvatar} alt={githubUser} class="auth-avatar" />
+            {:else}
+              <div class="auth-avatar-placeholder">&#128100;</div>
+            {/if}
+            <div class="auth-info">
+              <span class="auth-name">{githubUser}</span>
+              <span class="auth-status-text">Connected to GitHub</span>
+            </div>
+            <button class="btn btn-sm btn-outline" onclick={disconnect}>Disconnect</button>
+          </div>
+          <div class="form-row" style="margin-top: 0.8rem;">
+            <label>
+              <span>Repository Owner</span>
+              <input type="text" bind:value={repoOwner} placeholder={githubUser} onchange={saveSession} />
+            </label>
+            <label>
+              <span>Repository Name</span>
+              <input type="text" bind:value={repoName} placeholder="bangla-pdf-translator" onchange={saveSession} />
+            </label>
+          </div>
+        </div>
+      {:else}
+        <h3>Connect to GitHub</h3>
+        <p class="help-text">
+          Sign in with a Personal Access Token to upload PDFs and trigger translation workflows.
+        </p>
+
+        <div class="auth-steps">
+          <div class="auth-step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+              <a href={PAT_CREATE_URL} target="_blank" rel="noopener" class="btn btn-sm btn-primary">
+                Create a Token on GitHub
+              </a>
+              <span class="step-hint">Opens GitHub with the right permissions pre-selected</span>
+            </div>
+          </div>
+          <div class="auth-step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+              <div class="token-input-row">
+                <input
+                  type="password"
+                  bind:value={tokenInput}
+                  placeholder="Paste your token here (ghp_...)"
+                  onkeydown={(e) => { if (e.key === 'Enter') connectGitHub(); }}
+                  disabled={authStatus === 'connecting'}
+                />
+                <button
+                  class="btn btn-green"
+                  onclick={connectGitHub}
+                  disabled={!tokenInput.trim() || authStatus === 'connecting'}
+                >
+                  {authStatus === 'connecting' ? 'Connecting...' : 'Connect'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {#if authStatus === 'error'}
+          <div class="error-msg" style="margin-top: 0.8rem;">{authError}</div>
+        {/if}
+
+        <p class="help-text" style="margin-top: 1rem; font-size: 0.8rem;">
+          Your token is stored locally in your browser and never sent to any server except GitHub's API.
+        </p>
+      {/if}
     </div>
 
     <!-- Drop Zone -->
@@ -370,7 +524,7 @@
 
     <button
       class="btn btn-green submit-btn"
-      disabled={!file || !githubToken || !repoOwner || status === 'uploading'}
+      disabled={!file || authStatus !== 'connected' || !repoOwner || status === 'uploading'}
       onclick={handleSubmit}
     >
       {#if status === 'uploading'}
@@ -403,6 +557,99 @@
     padding: 0.15rem 0.4rem;
     border-radius: 4px;
     font-size: 0.8rem;
+  }
+
+  /* Auth connected state */
+  .auth-connected {
+    padding: 0.2rem 0;
+  }
+  .auth-user {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .auth-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid var(--accent-green);
+  }
+  .auth-avatar-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--accent-green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+  }
+  .auth-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+  .auth-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .auth-status-text {
+    font-size: 0.8rem;
+    color: var(--accent-green);
+  }
+
+  /* Auth steps */
+  .auth-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+  .auth-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+  }
+  .step-number {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+  }
+  .step-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .step-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+  .token-input-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .token-input-row input {
+    flex: 1;
+  }
+  .token-input-row .btn {
+    white-space: nowrap;
+  }
+
+  /* Button sizes */
+  .btn-sm {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.82rem;
   }
   .form-row {
     display: grid;
