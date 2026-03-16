@@ -1,6 +1,8 @@
-# Bangla PDF to English Book
+# Bangla PDF Translator
 
 A library website that hosts Bangla books translated to English. Upload a Bangla PDF through the web UI, and GitHub Actions automatically processes it: OCR extraction, machine translation, and document generation. Results are committed to the repo and deployed to GitHub Pages.
+
+Supports two OCR engines (Tesseract offline, AI vision models) and multiple translation backends (Argos offline, Google online, AI literary translation), with optional LLM refinement for literary-quality output.
 
 ## How It Works
 
@@ -9,8 +11,8 @@ A library website that hosts Bangla books translated to English. Upload a Bangla
   ─────────────────────           ──────────────────────
   Upload PDF via web UI  ──────>  Download PDF from release asset
   Trigger workflow_dispatch        Install Tesseract + Argos Translate
-  See "submitted" confirmation     Extract text (PyMuPDF + Tesseract OCR)
-  Check Actions progress           Translate (Argos offline / Google online)
+  See "submitted" confirmation     Extract text (Tesseract OCR or AI Vision)
+  Check Actions progress           Translate (Argos / Google / AI literary)
                                    Optionally refine with AI (GitHub Models)
   Browse library  <────────────   Generate AsciiDoc + HTML + PDF
   Read books online                Commit to library/{slug}/
@@ -20,7 +22,7 @@ A library website that hosts Bangla books translated to English. Upload a Bangla
 ## Architecture
 
 ```
-bangla-pdf-to-eng-book/
+bangla-pdf-translator/
 ├── .github/workflows/
 │   ├── translate.yml        # Translation pipeline (workflow_dispatch)
 │   └── deploy.yml           # Build Astro + deploy to GitHub Pages
@@ -73,7 +75,7 @@ bangla-pdf-to-eng-book/
 2. Go to **Settings > Pages** and set source to **GitHub Actions**
 3. Update `astro.config.mjs`:
    - Set `site` to `https://YOUR_USERNAME.github.io`
-   - Set `base` to `/bangla-pdf-to-eng-book` (or your repo name)
+   - Set `base` to `/bangla-pdf-translator` (or your repo name)
 
 ### 2. Set Up Secrets
 
@@ -82,7 +84,8 @@ Go to **Settings > Secrets and variables > Actions** and add:
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `GITHUB_TOKEN` | Auto | Provided automatically by GitHub Actions |
-| `OPENAI_API_KEY` | Optional | For OpenAI AI refinement |
+| `OPENAI_API_KEY` | Optional | For OpenAI AI OCR, translation, or refinement |
+| `GITHUB_TOKEN` (PAT) | Optional | For GitHub Models AI provider (uses models.inference.ai.azure.com) |
 
 > **Note:** The default `GITHUB_TOKEN` has sufficient permissions for the translate workflow. For the upload UI, users need a Personal Access Token (PAT) with `repo` scope.
 
@@ -104,7 +107,7 @@ Push to `main` to trigger the first deployment:
 git push origin main
 ```
 
-The site will be available at `https://YOUR_USERNAME.github.io/bangla-pdf-to-eng-book/`
+The site will be available at `https://YOUR_USERNAME.github.io/bangla-pdf-translator/`
 
 ## Usage
 
@@ -121,16 +124,22 @@ The site will be available at `https://YOUR_USERNAME.github.io/bangla-pdf-to-eng
 
 | Step | Tool | Description |
 |------|------|-------------|
-| Extract | PyMuPDF + Tesseract | Digital pages: direct text extraction. Scanned pages: 300 DPI OCR with `ben+eng` |
-| Translate | Argos (offline) or Google (online) | Chunks text at Bangla sentence boundaries, translates each chunk |
-| Refine | GitHub Models or OpenAI (optional) | Sends original + translation to LLM for literary polish |
+| Extract | PyMuPDF + Tesseract or AI Vision | Digital pages: direct text extraction. Scanned pages: 300 DPI OCR with `ben+eng` (Tesseract) or AI vision model (OpenAI/GitHub Models) |
+| Translate | Argos (offline), Google (online), or AI (literary) | Chunks text at Bangla sentence boundaries, translates each chunk |
+| Refine | GitHub Models or OpenAI (optional) | Sends original + translation to LLM for literary polish (skipped in AI translation mode) |
 | Generate | AsciiDoc + asciidoctor | Creates `.adoc` source, converts to HTML and PDF |
 
 ## Translation Modes
 
 - **Offline (Argos):** No internet needed. ~100MB model downloaded during workflow. Good enough quality for most books.
 - **Online (Google):** Better quality. Rate-limited with sliding window + exponential backoff retry.
-- **AI Refinement:** Optional post-translation step. Uses GitHub Models API (free with GitHub PAT) or OpenAI for literary-quality output.
+- **AI (Literary):** Best quality. Uses AI models (OpenAI or GitHub Models) to produce literary-quality English prose directly from Bengali text. Same approach used to translate Humayun Ahmed's "Moyurakkhi" (69 pages).
+- **AI Refinement:** Optional post-translation step for Argos/Google modes. Uses GitHub Models API (free with GitHub PAT) or OpenAI for literary polish.
+
+## OCR Engines
+
+- **Tesseract (default):** Offline OCR with `ben+eng` language pack. Works well for clean digital PDFs.
+- **AI Vision:** Uses OpenAI-compatible vision models to extract Bengali text from page images. Better accuracy for scanned or complex layouts.
 
 ## Local Development
 

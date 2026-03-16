@@ -31,7 +31,7 @@
   // GitHub config — user provides these
   let githubToken = $state('');
   let repoOwner = $state('');
-  let repoName = $state('bangla-pdf-to-eng-book');
+  let repoName = $state('bangla-pdf-translator');
 
   const models = [
     { value: 'gpt-4o-mini', label: 'GPT-4o Mini (default)' },
@@ -206,7 +206,7 @@
         </label>
         <label>
           <span>Repository Name</span>
-          <input type="text" bind:value={repoName} placeholder="bangla-pdf-to-eng-book" />
+          <input type="text" bind:value={repoName} placeholder="bangla-pdf-translator" />
         </label>
       </div>
       <label>
