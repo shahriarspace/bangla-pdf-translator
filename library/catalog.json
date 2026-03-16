@@ -1,3 +1,19 @@
 {
-  "books": []
+  "books": [
+    {
+      "slug": "eki-kando-by-humayun-ahmed",
+      "title": "Eki Kando! By Humayun Ahmed",
+      "status": "translated",
+      "date_added": "2026-03-16T15:11:37.622625+00:00",
+      "page_count": 51,
+      "translation_mode": "offline",
+      "date_translated": "2026-03-16T15:16:47.544450+00:00",
+      "files": {
+        "original_pdf": "Eki Kando! By Humayun Ahmed.pdf",
+        "translated_adoc": "Eki Kando! By Humayun Ahmed_english.adoc",
+        "translated_html": "Eki Kando! By Humayun Ahmed_english.html",
+        "translated_pdf": "Eki Kando! By Humayun Ahmed_english.pdf"
+      }
+    }
+  ]
 }
