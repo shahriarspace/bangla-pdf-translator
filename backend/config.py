@@ -25,12 +25,13 @@ GITHUB_MODEL = os.getenv("GITHUB_MODEL", "gpt-4o-mini")
 GITHUB_MODELS_URL = "https://models.inference.ai.azure.com"
 
 # Translation
-# TRANSLATION_MODE: "offline" (Argos), "online" (Google), "hybrid" (Argos + Google)
+# TRANSLATION_MODE: "offline" (Argos), "online" (Google), "hybrid", "ai" (full AI)
 TRANSLATION_MODE = os.getenv("TRANSLATION_MODE", "offline")
 FREE_TRANSLATOR = os.getenv("FREE_TRANSLATOR", "google")  # legacy, kept for compat
 ENABLE_LLM_REFINEMENT = os.getenv("ENABLE_LLM_REFINEMENT", "false").lower() == "true"
 
 # OCR
+# OCR_ENGINE: "tesseract" (default, offline) or "ai" (vision model via API)
 OCR_ENGINE = os.getenv("OCR_ENGINE", "tesseract")
 _default_tesseract = (
     "/usr/bin/tesseract"
@@ -38,6 +39,22 @@ _default_tesseract = (
     else r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 )
 TESSERACT_PATH = os.getenv("TESSERACT_PATH", _default_tesseract)
+
+# AI Pipeline settings (for OCR_ENGINE=ai and/or TRANSLATION_MODE=ai)
+# Ported from PDF-to-Book project: uses OpenAI-compatible API with vision
+# for high-quality AI OCR and literary AI translation.
+# AI_PROVIDER: "openai" or "github" — which API endpoint to use
+AI_PROVIDER = os.getenv("AI_PROVIDER", "github")
+# AI_OCR_MODEL: Vision-capable model for OCR (must support image inputs)
+AI_OCR_MODEL = os.getenv("AI_OCR_MODEL", "gpt-4o")
+# AI_TRANSLATE_MODEL: Model for literary translation
+AI_TRANSLATE_MODEL = os.getenv("AI_TRANSLATE_MODEL", "gpt-4o")
+# AI_MAX_RETRIES: Retries per page on failure
+AI_MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "3"))
+# AI_RETRY_DELAY: Base delay between retries in seconds
+AI_RETRY_DELAY = float(os.getenv("AI_RETRY_DELAY", "5.0"))
+# AI_PAGE_DELAY: Delay between pages in seconds (rate limiting)
+AI_PAGE_DELAY = float(os.getenv("AI_PAGE_DELAY", "2.0"))
 
 # Server
 HOST = os.getenv("HOST", "0.0.0.0")

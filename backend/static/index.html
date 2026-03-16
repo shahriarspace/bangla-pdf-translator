@@ -290,19 +290,33 @@
 
     <!-- Options -->
     <div class="card">
+      <h2>OCR Engine</h2>
+
+      <!-- OCR engine toggle -->
+      <div class="form-group">
+        <label>Text Extraction Method</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" data-ocr="tesseract" onclick="setOcr(this)">Tesseract (offline)</button>
+          <button class="toggle-btn" data-ocr="ai" onclick="setOcr(this)">AI Vision (online)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Translation Options</h2>
 
       <!-- Translation mode toggle -->
       <div class="form-group">
         <label>Translation Engine</label>
-        <div class="toggle-group">
+        <div class="toggle-group" id="mode-toggle">
           <button class="toggle-btn active" data-mode="offline" onclick="setMode(this)">Offline (Argos)</button>
           <button class="toggle-btn" data-mode="online" onclick="setMode(this)">Online (Google)</button>
+          <button class="toggle-btn" data-mode="ai" onclick="setMode(this)">AI (literary)</button>
         </div>
       </div>
 
-      <!-- AI Refinement -->
-      <div class="form-group">
+      <!-- AI Refinement (hidden for AI translation mode — it does its own refinement) -->
+      <div class="form-group" id="refinement-section">
         <label>AI Refinement</label>
         <select id="refinement-provider" onchange="toggleModelPicker()">
           <option value="none">None</option>
@@ -321,6 +335,37 @@
           <option value="DeepSeek-R1">DeepSeek R1</option>
           <option value="Mistral-Large-2411">Mistral Large</option>
           <option value="Meta-Llama-3.1-405B-Instruct">Llama 3.1 405B</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- AI Pipeline Settings (shown when OCR=ai or Translation=ai) -->
+    <div class="card hidden" id="ai-settings">
+      <h2>AI Pipeline Settings</h2>
+
+      <div class="form-group">
+        <label>AI Provider</label>
+        <select id="ai-provider">
+          <option value="github">GitHub Models (free with PAT)</option>
+          <option value="openai">OpenAI</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="ai-ocr-model-group">
+        <label>AI OCR Model (vision-capable)</label>
+        <select id="ai-ocr-model">
+          <option value="gpt-4o">GPT-4o (recommended)</option>
+          <option value="gpt-4o-mini">GPT-4o Mini (faster, cheaper)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="ai-translate-model-group">
+        <label>AI Translation Model</label>
+        <select id="ai-translate-model">
+          <option value="gpt-4o">GPT-4o (recommended)</option>
+          <option value="gpt-4o-mini">GPT-4o Mini (faster, cheaper)</option>
+          <option value="o3-mini">o3-mini</option>
+          <option value="DeepSeek-R1">DeepSeek R1</option>
         </select>
       </div>
     </div>
@@ -384,6 +429,7 @@
 <script>
   let selectedFile = null;
   let translationMode = 'offline';
+  let ocrEngine = 'tesseract';
 
   // ── Drop zone ──────────────────────────────────────
   const dropZone = document.getElementById('drop-zone');
@@ -415,11 +461,43 @@
     document.getElementById('submit-btn').disabled = false;
   }
 
+  // ── OCR engine toggle ─────────────────────────────
+  function setOcr(btn) {
+    btn.parentElement.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    ocrEngine = btn.dataset.ocr;
+    updateAiSettingsVisibility();
+  }
+
   // ── Translation mode toggle ────────────────────────
   function setMode(btn) {
-    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#mode-toggle .toggle-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     translationMode = btn.dataset.mode;
+
+    // Hide refinement when translation mode is "ai" (it has built-in high-quality translation)
+    const refinementSection = document.getElementById('refinement-section');
+    const modelPicker = document.getElementById('model-picker');
+    if (translationMode === 'ai') {
+      refinementSection.style.display = 'none';
+      modelPicker.classList.add('hidden');
+    } else {
+      refinementSection.style.display = '';
+      toggleModelPicker();
+    }
+
+    updateAiSettingsVisibility();
+  }
+
+  // ── AI settings panel visibility ──────────────────
+  function updateAiSettingsVisibility() {
+    const aiPanel = document.getElementById('ai-settings');
+    const needsAi = ocrEngine === 'ai' || translationMode === 'ai';
+    aiPanel.classList.toggle('hidden', !needsAi);
+
+    // Show/hide individual model selectors based on what uses AI
+    document.getElementById('ai-ocr-model-group').style.display = ocrEngine === 'ai' ? '' : 'none';
+    document.getElementById('ai-translate-model-group').style.display = translationMode === 'ai' ? '' : 'none';
   }
 
   // ── Model picker visibility ────────────────────────
@@ -434,13 +512,24 @@
 
     const refinementProvider = document.getElementById('refinement-provider').value;
     const refinementModel = document.getElementById('refinement-model').value;
+    const aiProvider = document.getElementById('ai-provider').value;
+    const aiOcrModel = document.getElementById('ai-ocr-model').value;
+    const aiTranslateModel = document.getElementById('ai-translate-model').value;
 
     // Build form data
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('translation_mode', translationMode);
+    formData.append('ocr_engine', ocrEngine);
     formData.append('refinement_provider', refinementProvider);
     formData.append('refinement_model', refinementProvider !== 'none' ? refinementModel : '');
+
+    // AI pipeline settings (sent when OCR or translation uses AI)
+    if (ocrEngine === 'ai' || translationMode === 'ai') {
+      formData.append('ai_provider', aiProvider);
+      if (ocrEngine === 'ai') formData.append('ai_ocr_model', aiOcrModel);
+      if (translationMode === 'ai') formData.append('ai_translate_model', aiTranslateModel);
+    }
 
     // Hide upload, show pipeline + progress
     document.getElementById('upload-section').style.display = 'none';

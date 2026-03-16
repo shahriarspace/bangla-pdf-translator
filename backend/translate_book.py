@@ -160,7 +160,13 @@ def main():
     parser.add_argument("--pdf-url", required=True, help="URL to download the PDF")
     parser.add_argument("--filename", required=True, help="Original PDF filename")
     parser.add_argument(
-        "--mode", default="offline", choices=["offline", "online", "hybrid"]
+        "--mode", default="offline", choices=["offline", "online", "hybrid", "ai"]
+    )
+    parser.add_argument(
+        "--ocr-engine",
+        default="tesseract",
+        choices=["tesseract", "ai"],
+        help="OCR engine: tesseract (offline) or ai (vision model)",
     )
     parser.add_argument(
         "--refinement", default="none", choices=["none", "openai", "github"]
@@ -187,7 +193,11 @@ def main():
     try:
         # Step 1: Extract text
         print("\n=== Step 1: Extracting text ===")
-        book = extract_text(str(pdf_path), on_progress=progress_callback)
+        book = extract_text(
+            str(pdf_path),
+            on_progress=progress_callback,
+            ocr_engine=args.ocr_engine,
+        )
         print(f"  Extracted {book.total_pages} pages")
 
         # Step 2: Translate

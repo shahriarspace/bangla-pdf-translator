@@ -14,4 +14,8 @@ services:
     environment:
       - OCR_ENGINE=tesseract
       - TESSERACT_PATH=/usr/bin/tesseract
+      # AI pipeline (set GITHUB_TOKEN or OPENAI_API_KEY in .env to enable)
+      # - AI_PROVIDER=github
+      # - AI_OCR_MODEL=gpt-4o
+      # - AI_TRANSLATE_MODEL=gpt-4o
     restart: unless-stopped

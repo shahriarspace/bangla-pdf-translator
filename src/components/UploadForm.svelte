@@ -21,8 +21,12 @@
 
   // Translation options
   let translationMode = $state('offline');
+  let ocrEngine = $state('tesseract');
   let refinementProvider = $state('none');
   let refinementModel = $state('gpt-4o-mini');
+  let aiProvider = $state('github');
+  let aiOcrModel = $state('gpt-4o');
+  let aiTranslateModel = $state('gpt-4o');
 
   // GitHub config — user provides these
   let githubToken = $state('');
@@ -37,6 +41,20 @@
     { value: 'Mistral-Large-2411', label: 'Mistral Large' },
     { value: 'Meta-Llama-3.1-405B-Instruct', label: 'Llama 3.1 405B' },
   ];
+
+  const aiModels = [
+    { value: 'gpt-4o', label: 'GPT-4o (recommended)' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini (faster, cheaper)' },
+    { value: 'o3-mini', label: 'o3-mini' },
+    { value: 'DeepSeek-R1', label: 'DeepSeek R1' },
+  ];
+
+  const aiVisionModels = [
+    { value: 'gpt-4o', label: 'GPT-4o (recommended)' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini (faster, cheaper)' },
+  ];
+
+  let needsAiSettings = $derived(ocrEngine === 'ai' || translationMode === 'ai');
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();
@@ -131,8 +149,12 @@
               release_id: String(release.id),
               asset_download_url: asset.browser_download_url,
               translation_mode: translationMode,
+              ocr_engine: ocrEngine,
               refinement_provider: refinementProvider,
               refinement_model: refinementProvider !== 'none' ? refinementModel : '',
+              ai_provider: needsAiSettings ? aiProvider : 'github',
+              ai_ocr_model: ocrEngine === 'ai' ? aiOcrModel : 'gpt-4o',
+              ai_translate_model: translationMode === 'ai' ? aiTranslateModel : 'gpt-4o',
             },
           }),
         }
@@ -229,6 +251,30 @@
 
     <!-- Translation Options -->
     <div class="options-section card">
+      <h3>OCR Engine</h3>
+
+      <div class="option-group">
+        <label class="option-label">Text Extraction Method</label>
+        <div class="toggle-group">
+          <button
+            class="toggle-btn"
+            class:active={ocrEngine === 'tesseract'}
+            onclick={() => ocrEngine = 'tesseract'}
+          >
+            Tesseract (offline)
+          </button>
+          <button
+            class="toggle-btn"
+            class:active={ocrEngine === 'ai'}
+            onclick={() => ocrEngine = 'ai'}
+          >
+            AI Vision (online)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="options-section card">
       <h3>Translation Options</h3>
 
       <div class="option-group">
@@ -248,29 +294,74 @@
           >
             Online (Google)
           </button>
+          <button
+            class="toggle-btn"
+            class:active={translationMode === 'ai'}
+            onclick={() => translationMode = 'ai'}
+          >
+            AI (literary)
+          </button>
         </div>
       </div>
 
-      <div class="option-group">
-        <label class="option-label">AI Refinement</label>
-        <select bind:value={refinementProvider} class="select">
-          <option value="none">None</option>
-          <option value="github">GitHub Models</option>
-          <option value="openai">OpenAI</option>
-        </select>
-      </div>
-
-      {#if refinementProvider !== 'none'}
+      {#if translationMode !== 'ai'}
         <div class="option-group">
-          <label class="option-label">Model</label>
-          <select bind:value={refinementModel} class="select">
-            {#each models as m}
-              <option value={m.value}>{m.label}</option>
-            {/each}
+          <label class="option-label">AI Refinement</label>
+          <select bind:value={refinementProvider} class="select">
+            <option value="none">None</option>
+            <option value="github">GitHub Models</option>
+            <option value="openai">OpenAI</option>
           </select>
         </div>
+
+        {#if refinementProvider !== 'none'}
+          <div class="option-group">
+            <label class="option-label">Model</label>
+            <select bind:value={refinementModel} class="select">
+              {#each models as m}
+                <option value={m.value}>{m.label}</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
       {/if}
     </div>
+
+    {#if needsAiSettings}
+      <div class="options-section card">
+        <h3>AI Pipeline Settings</h3>
+
+        <div class="option-group">
+          <label class="option-label">AI Provider</label>
+          <select bind:value={aiProvider} class="select">
+            <option value="github">GitHub Models (free with PAT)</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </div>
+
+        {#if ocrEngine === 'ai'}
+          <div class="option-group">
+            <label class="option-label">AI OCR Model (vision-capable)</label>
+            <select bind:value={aiOcrModel} class="select">
+              {#each aiVisionModels as m}
+                <option value={m.value}>{m.label}</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
+
+        {#if translationMode === 'ai'}
+          <div class="option-group">
+            <label class="option-label">AI Translation Model</label>
+            <select bind:value={aiTranslateModel} class="select">
+              {#each aiModels as m}
+                <option value={m.value}>{m.label}</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Submit -->
     {#if status === 'error'}

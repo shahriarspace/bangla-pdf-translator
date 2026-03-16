@@ -29,9 +29,14 @@ on:
         required: true
         type: string
       translation_mode:
-        description: 'Translation engine: offline (Argos) or online (Google)'
+        description: 'Translation engine: offline (Argos), online (Google), or ai (literary AI)'
         required: false
         default: 'offline'
+        type: string
+      ocr_engine:
+        description: 'OCR engine: tesseract (offline) or ai (vision model)'
+        required: false
+        default: 'tesseract'
         type: string
       refinement_provider:
         description: 'AI refinement: none, github, or openai'
@@ -42,6 +47,21 @@ on:
         description: 'AI model name override'
         required: false
         default: ''
+        type: string
+      ai_provider:
+        description: 'AI pipeline provider: github or openai (for ocr_engine=ai or translation_mode=ai)'
+        required: false
+        default: 'github'
+        type: string
+      ai_ocr_model:
+        description: 'AI OCR model (vision-capable, e.g. gpt-4o)'
+        required: false
+        default: 'gpt-4o'
+        type: string
+      ai_translate_model:
+        description: 'AI translation model (e.g. gpt-4o)'
+        required: false
+        default: 'gpt-4o'
         type: string
 
 permissions:
@@ -100,12 +120,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_PROVIDER: ${{ inputs.ai_provider }}
+          AI_OCR_MODEL: ${{ inputs.ai_ocr_model }}
+          AI_TRANSLATE_MODEL: ${{ inputs.ai_translate_model }}
         run: |
           python backend/translate_book.py \
             --slug "${{ inputs.slug }}" \
             --pdf-url "${{ inputs.asset_download_url }}" \
             --filename "${{ inputs.pdf_filename }}" \
             --mode "${{ inputs.translation_mode }}" \
+            --ocr-engine "${{ inputs.ocr_engine }}" \
             --refinement "${{ inputs.refinement_provider }}" \
             --model "${{ inputs.refinement_model }}"
 

@@ -167,20 +167,38 @@ async def upload_pdf(
     refinement_provider: str = Form("none"),
     refinement_model: str = Form(""),
     translation_mode: str = Form(""),
+    ocr_engine: str = Form(""),
+    ai_provider: str = Form(""),
+    ai_ocr_model: str = Form(""),
+    ai_translate_model: str = Form(""),
 ):
     """Upload a Bangla PDF and start processing."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
     # Validate translation_mode; fall back to config default
-    valid_modes = ("offline", "online", "hybrid")
+    valid_modes = ("offline", "online", "hybrid", "ai")
     if translation_mode not in valid_modes:
         translation_mode = config.TRANSLATION_MODE
+
+    # Validate OCR engine; fall back to config default
+    valid_ocr = ("tesseract", "ai")
+    if ocr_engine not in valid_ocr:
+        ocr_engine = config.OCR_ENGINE
 
     # Validate refinement_provider
     valid_providers = ("none", "openai", "github")
     if refinement_provider not in valid_providers:
         refinement_provider = "none"
+
+    # Apply AI provider/model overrides to config for this request
+    # These are process-global, which is fine for single-user Docker usage.
+    if ai_provider in ("openai", "github"):
+        config.AI_PROVIDER = ai_provider
+    if ai_ocr_model:
+        config.AI_OCR_MODEL = ai_ocr_model
+    if ai_translate_model:
+        config.AI_TRANSLATE_MODEL = ai_translate_model
 
     job_id = str(uuid.uuid4())[:8]
     job_dir = config.JOBS_DIR / job_id
@@ -201,6 +219,7 @@ async def upload_pdf(
         "refinement_provider": refinement_provider,
         "refinement_model": refinement_model,
         "translation_mode": translation_mode,
+        "ocr_engine": ocr_engine,
         "progress": 0,
         "total_steps": 0,
         "current_step": "",
@@ -386,7 +405,11 @@ async def _process_job(job_id: str):
                 job["total_steps"] = total
                 job["current_step"] = msg
 
-            return extract_text(job["pdf_path"], on_progress=on_progress)
+            return extract_text(
+                job["pdf_path"],
+                on_progress=on_progress,
+                ocr_engine=job.get("ocr_engine"),
+            )
 
         loop = asyncio.get_event_loop()
         book = await loop.run_in_executor(None, do_extract)

@@ -5,13 +5,16 @@ Multi-backend translation pipeline:
 1. Argos Translate (offline, default) — no internet, no rate limits
 2. Google Translate (online) — better quality, has rate limits
 3. Hybrid — Argos offline with Google as fallback/enhancement
-4. Optional LLM refinement via OpenAI (any mode)
+4. AI — Direct literary translation via AI model (OpenAI / GitHub Models)
+         Ported from PDF-to-Book project — same prompts for consistent results
+5. Optional LLM refinement via OpenAI (any mode except AI)
 
 Reports progress via callback for the web UI.
 """
 
 import collections
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -161,6 +164,45 @@ def _chunk_text(text: str, max_length: int = CHUNK_SIZE) -> list[str]:
     return chunks
 
 
+# ── AI output cleaning (shared with extractor) ───────────────────────────
+
+_BOILERPLATE_PATTERNS = [
+    r"^let me know",
+    r"^i hope this",
+    r"^feel free to",
+    r"^if you need",
+    r"^please let me",
+    r"^is there anything",
+    r"^do you want",
+    r"^would you like",
+    r"^---\s*$",
+]
+
+
+def _clean_ai_output(text: str) -> str:
+    """Remove markdown fences and trailing boilerplate from AI output."""
+    lines = text.rstrip().split("\n")
+
+    # Strip leading/trailing markdown code fences
+    if lines and re.match(r"^```\w*$", lines[0].strip()):
+        lines.pop(0)
+    if lines and lines[-1].strip() == "```":
+        lines.pop()
+
+    # Remove trailing boilerplate
+    while lines:
+        last = lines[-1].strip().lower()
+        if not last:
+            lines.pop()
+            continue
+        if any(re.match(pat, last) for pat in _BOILERPLATE_PATTERNS):
+            lines.pop()
+            continue
+        break
+
+    return "\n".join(lines).rstrip()
+
+
 # ── Translation backends ──────────────────────────────────────────────────
 
 
@@ -255,6 +297,115 @@ def _translate_hybrid(text: str) -> str:
         logger.info(f"Google unavailable in hybrid mode, using Argos: {e}")
 
     return argos_result
+
+
+# ── AI Translation (high quality, from PDF-to-Book project) ───────────────
+
+
+def _get_ai_client():
+    """Create an OpenAI-compatible client based on AI_PROVIDER config."""
+    from openai import OpenAI
+
+    provider = config.AI_PROVIDER.lower()
+    if provider == "github":
+        if not config.GITHUB_TOKEN:
+            raise ValueError(
+                "GITHUB_TOKEN is required for AI provider 'github'. "
+                "Set it in .env or environment variables."
+            )
+        return OpenAI(
+            base_url=config.GITHUB_MODELS_URL,
+            api_key=config.GITHUB_TOKEN,
+        )
+    elif provider == "openai":
+        if not config.OPENAI_API_KEY:
+            raise ValueError(
+                "OPENAI_API_KEY is required for AI provider 'openai'. "
+                "Set it in .env or environment variables."
+            )
+        return OpenAI(api_key=config.OPENAI_API_KEY)
+    else:
+        raise ValueError(f"Unknown AI_PROVIDER: {provider}. Use 'openai' or 'github'.")
+
+
+def _translate_ai(text: str) -> str:
+    """Translate Bangla text to English using an AI model.
+
+    Uses the same literary translation prompt from the PDF-to-Book project.
+    Sends the full page text (not chunked) to the AI for coherent translation.
+    Retries with exponential backoff on failure.
+    """
+    if not text.strip():
+        return ""
+
+    client = _get_ai_client()
+    model = config.AI_TRANSLATE_MODEL
+
+    # Literary translation prompt — same approach as PDF-to-Book
+    prompt = (
+        "You are an expert literary translator from Bengali to English. "
+        "Below is Bengali text extracted from a novel. "
+        "Translate it into natural, literary English. "
+        "Preserve the tone, style, and paragraph structure of the original. "
+        "Use natural English prose — do not be overly literal.\n\n"
+        "Output ONLY the English translation. "
+        "Do NOT include the original Bengali text. "
+        "Do NOT add any commentary, headers, notes, or explanation.\n\n"
+        "--- BEGIN BENGALI TEXT ---\n"
+        f"{text}\n"
+        "--- END BENGALI TEXT ---"
+    )
+
+    last_error = None
+    for attempt in range(1, config.AI_MAX_RETRIES + 1):
+        try:
+            t0 = time.time()
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an expert Bengali-to-English literary translator. "
+                            "Produce polished, publication-ready English text that "
+                            "preserves the original's tone and style."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=4000,
+            )
+            elapsed = time.time() - t0
+            content = response.choices[0].message.content or ""
+            result = _clean_ai_output(content)
+
+            if result:
+                logger.debug(
+                    f"AI translation OK: {len(result)} chars in {elapsed:.1f}s"
+                )
+                return result
+            else:
+                logger.warning(
+                    f"AI translation attempt {attempt}/{config.AI_MAX_RETRIES}: "
+                    f"empty response ({elapsed:.1f}s)"
+                )
+
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                f"AI translation attempt {attempt}/{config.AI_MAX_RETRIES} failed: {e}"
+            )
+
+        if attempt < config.AI_MAX_RETRIES:
+            delay = config.AI_RETRY_DELAY * attempt
+            logger.info(f"  Retrying in {delay:.0f}s...")
+            time.sleep(delay)
+
+    logger.error(
+        f"AI translation FAILED after {config.AI_MAX_RETRIES} attempts: {last_error}"
+    )
+    return f"[AI Translation failed: {last_error}]"
 
 
 # ── LLM refinement ────────────────────────────────────────────────────────
@@ -373,6 +524,7 @@ BACKENDS = {
     "offline": _translate_argos,
     "online": _translate_google,
     "hybrid": _translate_hybrid,
+    "ai": _translate_ai,
 }
 
 
@@ -394,7 +546,7 @@ def translate_pages(
         refinement_provider: "none", "openai", or "github".
         refinement_model: Model name override (e.g. "gpt-4o", "gpt-4o-mini").
                           Empty string = use config default.
-        translation_mode: "offline" (Argos), "online" (Google), "hybrid".
+        translation_mode: "offline" (Argos), "online" (Google), "hybrid", "ai".
                           Defaults to config.TRANSLATION_MODE.
         on_progress: Optional callback(current, total, status_msg).
     """
@@ -402,25 +554,28 @@ def translate_pages(
     if use_llm and refinement_provider == "none":
         refinement_provider = "openai"
 
-    refine_fn = None
-    refine_label = None
-    if refinement_provider == "openai":
-        refine_fn = _refine_with_llm
-        refine_label = "OpenAI"
-    elif refinement_provider == "github":
-        refine_fn = _refine_with_github
-        refine_label = "GitHub Models"
-
     mode = translation_mode or config.TRANSLATION_MODE
     translate_fn = BACKENDS.get(mode)
     if translate_fn is None:
         logger.warning(f"Unknown translation mode '{mode}', falling back to offline")
         translate_fn = _translate_argos
 
+    # AI mode does its own high-quality translation — refinement is redundant
+    refine_fn = None
+    refine_label = None
+    if mode != "ai":
+        if refinement_provider == "openai":
+            refine_fn = _refine_with_llm
+            refine_label = "OpenAI"
+        elif refinement_provider == "github":
+            refine_fn = _refine_with_github
+            refine_label = "GitHub Models"
+
     mode_labels = {
         "offline": "Argos (offline)",
         "online": "Google (online)",
         "hybrid": "Hybrid (Argos + Google)",
+        "ai": f"AI ({config.AI_PROVIDER} / {config.AI_TRANSLATE_MODEL})",
     }
     mode_label = mode_labels.get(mode, mode)
     logger.info(f"Translation mode: {mode_label}")
@@ -483,5 +638,9 @@ def translate_pages(
                 refined_text=refined,
             )
         )
+
+        # Rate limit for AI mode
+        if mode == "ai" and i < total - 1:
+            time.sleep(config.AI_PAGE_DELAY)
 
     return results
