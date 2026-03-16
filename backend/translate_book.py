@@ -3,9 +3,9 @@
 translate_book.py — CLI script for GitHub Actions
 
 Standalone pipeline that:
-1. Downloads a PDF from a GitHub Release asset
-2. Extracts text (PyMuPDF + Tesseract OCR)
-3. Translates Bangla → English (Argos or Google)
+1. Copies a PDF from the uploads/ directory (committed via Contents API)
+2. Extracts text (PyMuPDF + Tesseract OCR or AI Vision)
+3. Translates Bangla → English (Argos, Google, or AI literary)
 4. Optionally refines with AI (GitHub Models / OpenAI)
 5. Generates AsciiDoc, HTML, PDF outputs
 6. Updates library/catalog.json
@@ -14,14 +14,14 @@ Standalone pipeline that:
 Usage:
   python backend/translate_book.py \
     --slug my-book \
-    --pdf-url "https://github.com/.../my-book.pdf" \
+    --pdf-path "uploads/my-book/my-book.pdf" \
     --filename "my-book.pdf" \
     --mode offline \
     --refinement none \
     --model ""
 
 Environment variables:
-  GITHUB_TOKEN    — for downloading release assets and AI refinement via GitHub Models
+  GITHUB_TOKEN    — for AI refinement via GitHub Models
   OPENAI_API_KEY  — for OpenAI refinement (optional)
 """
 
@@ -29,8 +29,8 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import sys
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -63,24 +63,6 @@ logger = logging.getLogger("translate_book")
 PROJECT_ROOT = BACKEND_DIR.parent
 LIBRARY_DIR = PROJECT_ROOT / "library"
 CATALOG_PATH = LIBRARY_DIR / "catalog.json"
-
-
-def download_pdf(url: str, dest: Path, token: str = "") -> None:
-    """Download a PDF from a URL (supports GitHub release assets)."""
-    logger.info(f"Downloading PDF from {url}")
-    req = urllib.request.Request(url)
-    if token:
-        req.add_header("Authorization", f"token {token}")
-    req.add_header("Accept", "application/octet-stream")
-
-    with urllib.request.urlopen(req) as response:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, "wb") as f:
-            while chunk := response.read(8192):
-                f.write(chunk)
-
-    size_mb = dest.stat().st_size / 1024 / 1024
-    logger.info(f"Downloaded: {dest} ({size_mb:.1f} MB)")
 
 
 def load_catalog() -> dict:
@@ -157,7 +139,11 @@ def main():
     parser.add_argument(
         "--slug", required=True, help="Book slug (used as directory name)"
     )
-    parser.add_argument("--pdf-url", required=True, help="URL to download the PDF")
+    parser.add_argument(
+        "--pdf-path",
+        required=True,
+        help="Path to the PDF in the repo (e.g. uploads/my-book/file.pdf)",
+    )
     parser.add_argument("--filename", required=True, help="Original PDF filename")
     parser.add_argument(
         "--mode", default="offline", choices=["offline", "online", "hybrid", "ai"]
@@ -178,12 +164,16 @@ def main():
     book_dir = LIBRARY_DIR / slug
     book_dir.mkdir(parents=True, exist_ok=True)
 
-    # Download PDF
+    # Copy PDF from uploads/ to library/{slug}/
     pdf_path = book_dir / args.filename
-    github_token = os.environ.get("GITHUB_TOKEN", "")
+    source_pdf = PROJECT_ROOT / args.pdf_path
 
     if not pdf_path.exists():
-        download_pdf(args.pdf_url, pdf_path, token=github_token)
+        if not source_pdf.exists():
+            logger.error(f"PDF not found at {source_pdf}")
+            sys.exit(1)
+        shutil.copy2(str(source_pdf), str(pdf_path))
+        logger.info(f"Copied PDF: {source_pdf} -> {pdf_path}")
     else:
         logger.info(f"PDF already exists: {pdf_path}")
 

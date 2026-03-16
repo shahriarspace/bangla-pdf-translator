@@ -514,46 +514,33 @@
     submittedSlug = slug;
 
     try {
-      // Step 1: Create a release
-      const releaseRes = await fetch(
-        `https://api.github.com/repos/${repoOwner}/${repoName}/releases`,
+      // Step 1: Read file as base64
+      const base64Content = await fileToBase64(file);
+
+      // Step 2: Upload PDF to repo via Contents API (CORS-compatible)
+      // Puts file at uploads/{slug}/{filename}
+      const filePath = `uploads/${slug}/${file.name}`;
+      const uploadRes = await fetch(
+        `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${encodeURIComponent(filePath)}`,
         {
-          method: 'POST',
+          method: 'PUT',
           headers: {
             Authorization: `token ${githubToken}`,
             'Content-Type': 'application/json',
+            Accept: 'application/vnd.github.v3+json',
           },
           body: JSON.stringify({
-            tag_name: `upload-${slug}-${Date.now()}`,
-            name: `Upload: ${file.name}`,
-            body: `Auto-created for PDF upload: ${file.name}`,
-            draft: true,
+            message: `Upload PDF for translation: ${file.name}`,
+            content: base64Content,
+            branch: 'main',
           }),
         }
       );
 
-      if (!releaseRes.ok) {
-        throw new Error(`Failed to create release: ${releaseRes.status} ${await releaseRes.text()}`);
-      }
-
-      const release = await releaseRes.json();
-      const uploadUrl = release.upload_url.replace('{?name,label}', `?name=${encodeURIComponent(file.name)}`);
-
-      // Step 2: Upload the PDF
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `token ${githubToken}`,
-          'Content-Type': 'application/pdf',
-        },
-        body: file,
-      });
-
       if (!uploadRes.ok) {
-        throw new Error(`Failed to upload PDF: ${uploadRes.status}`);
+        const errText = await uploadRes.text();
+        throw new Error(`Failed to upload PDF: ${uploadRes.status} ${errText}`);
       }
-
-      const asset = await uploadRes.json();
 
       // Step 3: Trigger the translation workflow
       const dispatchRes = await fetch(
@@ -569,8 +556,7 @@
             inputs: {
               pdf_filename: file.name,
               slug: slug,
-              release_id: String(release.id),
-              asset_download_url: asset.browser_download_url,
+              pdf_path: filePath,
               translation_mode: translationMode,
               ocr_engine: ocrEngine,
               refinement_provider: refinementProvider,
@@ -592,6 +578,19 @@
       status = 'error';
       errorMsg = e.message || 'Unknown error';
     }
+  }
+
+  function fileToBase64(f: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        // Remove the data:...;base64, prefix
+        const result = (reader.result as string).split(',')[1];
+        resolve(result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(f);
+    });
   }
 </script>
 

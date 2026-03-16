@@ -4,28 +4,181 @@ A library website that hosts Bangla books translated to English. Upload a Bangla
 
 Supports two OCR engines (Tesseract offline, AI vision models) and multiple translation backends (Argos offline, Google online, AI literary translation), with optional LLM refinement for literary-quality output.
 
-## How It Works
+## Architecture Diagram
 
-```
-  Browser (GitHub Pages)           GitHub Actions Runner
-  ─────────────────────           ──────────────────────
-  Upload PDF via web UI  ──────>  Download PDF from release asset
-  Trigger workflow_dispatch        Install Tesseract + Argos Translate
-  See "submitted" confirmation     Extract text (Tesseract OCR or AI Vision)
-  Check Actions progress           Translate (Argos / Google / AI literary)
-                                   Optionally refine with AI (GitHub Models)
-  Browse library  <────────────   Generate AsciiDoc + HTML + PDF
-  Read books online                Commit to library/{slug}/
-  Download translations            Rebuild & deploy Astro site
+```mermaid
+graph TB
+    subgraph Browser["Browser (GitHub Pages)"]
+        UI["Astro Static Site<br/>shahriarspace.github.io/bangla-pdf-translator"]
+        Upload["UploadForm.svelte<br/>Interactive Upload Island"]
+        Auth["OAuth Login Component"]
+    end
+
+    subgraph GitHubOAuth["GitHub OAuth"]
+        OAuthEndpoint["github.com/login/oauth/authorize"]
+        TokenEndpoint["github.com/login/oauth/access_token"]
+    end
+
+    subgraph GitHubRepo["GitHub Repository<br/>shahriarspace/bangla-pdf-translator"]
+        Releases["Draft Releases<br/>(PDF storage)"]
+        Library["library/<br/>catalog.json + book files"]
+        subgraph Workflows["GitHub Actions Workflows"]
+            OAuthWF["oauth-exchange.yml<br/>Code → Token exchange"]
+            TranslateWF["translate.yml<br/>Translation pipeline"]
+            DeployWF["deploy.yml<br/>Build & deploy"]
+        end
+        Artifacts["Workflow Artifacts<br/>(encrypted OAuth tokens)"]
+    end
+
+    subgraph TranslationPipeline["Translation Pipeline (Actions Runner)"]
+        subgraph OCR["OCR Engines"]
+            Tesseract["Tesseract<br/>(offline, ben+eng)"]
+            AIVision["AI Vision<br/>(GPT-4o)"]
+        end
+        subgraph Translation["Translation Engines"]
+            Argos["Argos Translate<br/>(offline)"]
+            Google["Google Translate<br/>(online)"]
+            AITrans["AI Literary<br/>(GPT-4o / GitHub Models)"]
+        end
+        subgraph Generation["Output Generation"]
+            AsciiDoc["AsciiDoc"]
+            HTML["HTML"]
+            PDF["PDF"]
+        end
+    end
+
+    subgraph ExternalAPIs["External APIs"]
+        GitHubModels["GitHub Models API<br/>models.inference.ai.azure.com"]
+        OpenAI["OpenAI API"]
+        GoogleAPI["Google Translate API"]
+    end
+
+    %% OAuth Flow
+    Auth -->|"1. Redirect"| OAuthEndpoint
+    OAuthEndpoint -->|"2. ?code=XXX"| Auth
+    Auth -->|"3. Trigger workflow"| OAuthWF
+    OAuthWF -->|"4. Exchange code"| TokenEndpoint
+    OAuthWF -->|"5. Encrypted token"| Artifacts
+    Auth -->|"6. Download & decrypt"| Artifacts
+
+    %% Upload Flow
+    Upload -->|"Upload PDF"| Releases
+    Upload -->|"Trigger workflow"| TranslateWF
+
+    %% Translation Flow
+    TranslateWF -->|"Download PDF"| Releases
+    TranslateWF --> OCR
+    OCR --> Translation
+    Translation --> Generation
+    Generation -->|"Commit results"| Library
+
+    %% Deploy Flow
+    Library -->|"Push triggers"| DeployWF
+    DeployWF -->|"Deploy"| UI
+
+    %% External API connections
+    AIVision -.->|"Vision API"| GitHubModels
+    AIVision -.->|"Vision API"| OpenAI
+    AITrans -.->|"Chat API"| GitHubModels
+    AITrans -.->|"Chat API"| OpenAI
+    Google -.->|"Translate API"| GoogleAPI
+
+    classDef browser fill:#1e1e2e,stroke:#6c63ff,color:#cdd6f4
+    classDef github fill:#161b22,stroke:#30363d,color:#c9d1d9
+    classDef pipeline fill:#0d1117,stroke:#22c55e,color:#c9d1d9
+    classDef external fill:#0d1117,stroke:#f59e0b,color:#c9d1d9
+    class UI,Upload,Auth browser
+    class Releases,Library,OAuthWF,TranslateWF,DeployWF,Artifacts github
+    class Tesseract,AIVision,Argos,Google,AITrans,AsciiDoc,HTML,PDF pipeline
+    class GitHubModels,OpenAI,GoogleAPI external
 ```
 
-## Architecture
+## Activity Diagram — Upload & Translation Flow
+
+```mermaid
+flowchart TD
+    Start([User visits Upload page]) --> AuthCheck{Authenticated?}
+
+    AuthCheck -->|No| AuthChoice{Choose auth method}
+    AuthChoice -->|OAuth| OAuthStart["Click 'Login with GitHub'"]
+    AuthChoice -->|PAT| PATInput["Paste Personal Access Token"]
+
+    OAuthStart --> Redirect["Redirect to GitHub OAuth"]
+    Redirect --> Authorize["User authorizes app"]
+    Authorize --> Callback["GitHub redirects back with ?code=XXX"]
+    Callback --> TriggerExchange["Browser triggers oauth-exchange.yml<br/>via trigger PAT"]
+    TriggerExchange --> ExchangeCode["GitHub Actions exchanges code<br/>for access token using client_secret"]
+    ExchangeCode --> EncryptToken["XOR-encrypt token with state parameter"]
+    EncryptToken --> UploadArtifact["Upload encrypted token as artifact"]
+    UploadArtifact --> PollArtifact["Browser polls for artifact"]
+    PollArtifact --> DownloadZip["Download & unzip artifact"]
+    DownloadZip --> DecryptToken["XOR-decrypt token with state"]
+    DecryptToken --> ValidateToken["Fetch /user to validate token"]
+    ValidateToken --> Connected["Connected - show avatar & username"]
+
+    PATInput --> ValidatePAT["Fetch /user to validate PAT"]
+    ValidatePAT --> Connected
+
+    AuthCheck -->|Yes - restored from localStorage| Connected
+
+    Connected --> SelectFile["Drop or browse for Bangla PDF"]
+    SelectFile --> ConfigOCR["Choose OCR engine<br/>Tesseract / AI Vision"]
+    ConfigOCR --> ConfigTranslation["Choose translation mode<br/>Offline / Online / AI Literary"]
+    ConfigTranslation --> ConfigRefine{"AI refinement?<br/>(non-AI modes only)"}
+    ConfigRefine -->|Yes| SelectModel["Select refinement model"]
+    ConfigRefine -->|No| Submit
+    SelectModel --> Submit
+
+    Submit["Click 'Upload & Translate'"] --> CreateRelease["Create draft GitHub release"]
+    CreateRelease --> UploadPDF["Upload PDF as release asset"]
+    UploadPDF --> DispatchWorkflow["Trigger translate.yml via workflow_dispatch"]
+    DispatchWorkflow --> Submitted([Show success + Actions link])
+
+    Submitted --> ActionsRunner["GitHub Actions Runner picks up job"]
+    ActionsRunner --> DownloadPDF["Download PDF from release"]
+    DownloadPDF --> ExtractText{"OCR Engine?"}
+
+    ExtractText -->|Tesseract| TesseractOCR["PyMuPDF + Tesseract OCR<br/>300 DPI, ben+eng"]
+    ExtractText -->|AI Vision| AIVisionOCR["Render pages as images<br/>Send to vision model"]
+    TesseractOCR --> BanglaText["Extracted Bangla text"]
+    AIVisionOCR --> BanglaText
+
+    BanglaText --> TranslateChoice{"Translation mode?"}
+    TranslateChoice -->|Offline| ArgosTranslate["Argos Translate<br/>(local model)"]
+    TranslateChoice -->|Online| GoogleTranslate["Google Translate<br/>(with rate limiting)"]
+    TranslateChoice -->|AI| AITranslate["AI literary translation<br/>(GPT-4o / GitHub Models)"]
+
+    ArgosTranslate --> EnglishText
+    GoogleTranslate --> EnglishText
+    AITranslate --> EnglishText["English translated text"]
+
+    EnglishText --> RefineCheck{"AI refinement<br/>enabled?"}
+    RefineCheck -->|Yes| Refine["Send to LLM for<br/>literary polish"]
+    RefineCheck -->|No| Generate
+    Refine --> Generate
+
+    Generate["Generate output files"] --> GenAdoc["AsciiDoc (.adoc)"]
+    Generate --> GenHTML["HTML (.html)"]
+    Generate --> GenPDF["PDF (.pdf)"]
+
+    GenAdoc --> CommitResults
+    GenHTML --> CommitResults
+    GenPDF --> CommitResults["Commit to library/{slug}/<br/>Update catalog.json"]
+
+    CommitResults --> TriggerDeploy["Trigger deploy.yml"]
+    TriggerDeploy --> BuildAstro["Build Astro static site"]
+    BuildAstro --> DeployPages["Deploy to GitHub Pages"]
+    DeployPages --> BookAvailable([Book appears in library])
+```
+
+## Project Structure
 
 ```
 bangla-pdf-translator/
 ├── .github/workflows/
 │   ├── translate.yml        # Translation pipeline (workflow_dispatch)
-│   └── deploy.yml           # Build Astro + deploy to GitHub Pages
+│   ├── deploy.yml           # Build Astro + deploy to GitHub Pages
+│   └── oauth-exchange.yml   # OAuth code → token exchange
 ├── src/                     # Astro frontend source
 │   ├── pages/
 │   │   ├── index.astro      # Home page (library overview)
@@ -39,7 +192,7 @@ bangla-pdf-translator/
 │   ├── layouts/
 │   │   └── BaseLayout.astro # Shared layout
 │   ├── components/
-│   │   └── UploadForm.svelte  # Interactive upload island
+│   │   └── UploadForm.svelte  # Interactive upload island (OAuth + PAT)
 │   └── types.ts             # TypeScript type definitions
 ├── public/                  # Static assets
 │   ├── styles/global.css
@@ -59,8 +212,8 @@ bangla-pdf-translator/
 │   ├── Dockerfile           # Legacy Docker image
 │   ├── docker-compose.yml   # Legacy Docker Compose
 │   └── src/
-│       ├── extractor.py     # PDF text extraction
-│       ├── translator.py    # Translation backends
+│       ├── extractor.py     # PDF text extraction (Tesseract + AI Vision)
+│       ├── translator.py    # Translation backends (Argos, Google, AI)
 │       └── generator.py     # AsciiDoc/HTML/PDF generation
 ├── astro.config.mjs         # Astro configuration
 ├── package.json             # Node.js dependencies
