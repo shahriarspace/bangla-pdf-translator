@@ -29,6 +29,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -143,6 +144,28 @@ def progress_callback(current: int, total: int, msg: str) -> None:
     print(f"  [{pct:3d}%] {msg}")
 
 
+def _has_bangla_unicode(text: str) -> bool:
+    """Check if text contains any Bangla Unicode characters (U+0980–U+09FF)."""
+    if not text:
+        return False
+    return any("\u0980" <= c <= "\u09ff" for c in text)
+
+
+def _is_plausible_english(text: str) -> bool:
+    """Check if text looks like plausible English/Latin text (not mojibake).
+
+    Mojibake from legacy Bangla fonts has unusual patterns: high density of
+    uppercase letters, special chars (^, |, `, ©, ¼), and non-word sequences.
+    Real English book titles are mostly lowercase words with normal punctuation.
+    """
+    if not text:
+        return False
+    # Count characters that are normal in English titles
+    normal = sum(1 for c in text if c.isalpha() or c in " '-:.,!?&0123456789")
+    # If more than 80% are normal English chars, it's probably real English
+    return len(text) > 0 and (normal / len(text)) > 0.80
+
+
 def extract_pdf_metadata(pdf_path: Path) -> dict:
     """
     Extract title and author from a PDF using a three-level fallback chain:
@@ -150,6 +173,10 @@ def extract_pdf_metadata(pdf_path: Path) -> dict:
       2. PyMuPDF text extraction with font-size heuristics on first pages
          (works for text-based PDFs — largest font = title, second = author)
       3. Tesseract OCR on the cover page (works for scanned PDFs)
+
+    At each level, results are validated for Bangla Unicode content.
+    Legacy fonts (SutonnyMJ, BanglaWord) produce mojibake (Latin chars
+    instead of Bengali), which is detected and skipped.
     """
     metadata = {"title": "", "author": ""}
 
@@ -165,9 +192,16 @@ def extract_pdf_metadata(pdf_path: Path) -> dict:
 
         # Only use if they look real (not empty, not a filepath, not 'untitled')
         if title and len(title) > 1 and not title.lower().startswith("untitled"):
-            metadata["title"] = title
+            # Check for mojibake — metadata from legacy-font PDFs can also be garbled
+            if _has_bangla_unicode(title) or _is_plausible_english(title):
+                metadata["title"] = title
+            else:
+                logger.info(f"Level 1 title looks like mojibake, skipping: {title!r}")
         if author and len(author) > 1:
-            metadata["author"] = author
+            if _has_bangla_unicode(author) or _is_plausible_english(author):
+                metadata["author"] = author
+            else:
+                logger.info(f"Level 1 author looks like mojibake, skipping: {author!r}")
 
         logger.info(f"PDF metadata (level 1) — title: {title!r}, author: {author!r}")
 
@@ -178,11 +212,27 @@ def extract_pdf_metadata(pdf_path: Path) -> dict:
             )
             l2 = _extract_metadata_from_text(doc)
             if l2["title"]:
-                metadata["title"] = l2["title"]
-                logger.info(f"Level 2 found title: {l2['title']!r}")
+                # Validate: reject if it looks like mojibake from legacy fonts
+                if _has_bangla_unicode(l2["title"]) or _is_plausible_english(
+                    l2["title"]
+                ):
+                    metadata["title"] = l2["title"]
+                    logger.info(f"Level 2 found title: {l2['title']!r}")
+                else:
+                    logger.info(
+                        f"Level 2 title looks like mojibake (legacy font), "
+                        f"skipping: {l2['title']!r}"
+                    )
             if l2["author"] and not metadata["author"]:
-                metadata["author"] = l2["author"]
-                logger.info(f"Level 2 found author: {l2['author']!r}")
+                if _has_bangla_unicode(l2["author"]) or _is_plausible_english(
+                    l2["author"]
+                ):
+                    metadata["author"] = l2["author"]
+                    logger.info(f"Level 2 found author: {l2['author']!r}")
+                else:
+                    logger.info(
+                        f"Level 2 author looks like mojibake, skipping: {l2['author']!r}"
+                    )
 
         # --- Level 3: Tesseract OCR on cover page ---
         if not metadata["title"]:

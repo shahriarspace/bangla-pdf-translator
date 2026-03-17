@@ -48,6 +48,28 @@ class BookContent:
     total_pages: int = 0
 
 
+def _has_bangla_unicode(text: str, min_ratio: float = 0.05) -> bool:
+    """Check if text contains a meaningful proportion of Bangla Unicode characters.
+
+    Bengali Unicode block: U+0980–U+09FF.
+    Legacy Bangla fonts (SutonnyMJ, BanglaWord, etc.) map Bengali glyphs to
+    Latin code points, so extracted text looks like ASCII mojibake with no
+    actual Bengali characters.  This function detects that situation.
+
+    Args:
+        text: The extracted text to check.
+        min_ratio: Minimum ratio of Bangla chars to total non-whitespace chars.
+                   Default 0.05 (5%) — even a few Bengali chars signal valid Unicode.
+    """
+    if not text:
+        return False
+    non_ws = re.sub(r"\s", "", text)
+    if not non_ws:
+        return False
+    bangla_chars = sum(1 for c in non_ws if "\u0980" <= c <= "\u09ff")
+    return (bangla_chars / len(non_ws)) >= min_ratio
+
+
 def _is_page_scanned(page: fitz.Page, min_text_length: int = 30) -> bool:
     """Determine if a page is scanned (image-based) vs digital."""
     text = page.get_text("text").strip()
@@ -276,12 +298,35 @@ def extract_text(
                 time.sleep(config.AI_PAGE_DELAY)
         else:
             text = page.get_text("text").strip()
-            page_content = PageContent(
-                page_number=page_num + 1, text=text, is_ocr=False
-            )
-            status = f"Extracted page {page_num + 1}/{total_pages} ({len(text)} chars)"
-            if on_progress:
-                on_progress(page_num + 1, total_pages, status)
+
+            # Detect mojibake from legacy Bangla fonts (SutonnyMJ, BanglaWord, etc.)
+            # These fonts map Bengali glyphs to Latin code points, so PyMuPDF
+            # returns ASCII-looking garbage with no actual Bengali Unicode chars.
+            # When detected, fall back to OCR for correct Unicode Bangla.
+            if text and not _has_bangla_unicode(text):
+                logger.info(
+                    f"  Page {page_num + 1}: text has no Bangla Unicode "
+                    f"(likely legacy font encoding) — falling back to OCR [{engine}]"
+                )
+                status = (
+                    f"OCR page {page_num + 1}/{total_pages} "
+                    f"[{engine}, legacy font fallback]"
+                )
+                if on_progress:
+                    on_progress(page_num + 1, total_pages, status)
+                page_content = ocr_fn(page, page_num + 1)
+
+                if engine == "ai" and page_num < total_pages - 1:
+                    time.sleep(config.AI_PAGE_DELAY)
+            else:
+                page_content = PageContent(
+                    page_number=page_num + 1, text=text, is_ocr=False
+                )
+                status = (
+                    f"Extracted page {page_num + 1}/{total_pages} ({len(text)} chars)"
+                )
+                if on_progress:
+                    on_progress(page_num + 1, total_pages, status)
 
         book.pages.append(page_content)
 
