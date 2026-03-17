@@ -80,6 +80,26 @@ on:
         required: false
         default: 'false'
         type: string
+      book_title_bn:
+        description: 'Book title in Bangla (for bilingual JSON export)'
+        required: false
+        default: ''
+        type: string
+      book_author_bn:
+        description: 'Book author in Bangla (for bilingual JSON export)'
+        required: false
+        default: ''
+        type: string
+      book_year:
+        description: 'Book publication year (for bilingual JSON export)'
+        required: false
+        default: ''
+        type: string
+      book_category:
+        description: 'Book category (for bilingual JSON export, default: Novel)'
+        required: false
+        default: 'Novel'
+        type: string
 
 permissions:
   contents: write
@@ -173,7 +193,20 @@ jobs:
             --refinement "${{ inputs.refinement_provider }}" \
             --model "${{ inputs.refinement_model }}" \
             --book-title "${{ inputs.book_title }}" \
-            --book-author "${{ inputs.book_author }}"
+            --book-author "${{ inputs.book_author }}" \
+            --book-title-bn "${{ inputs.book_title_bn }}" \
+            --book-author-bn "${{ inputs.book_author_bn }}" \
+            --book-year "${{ inputs.book_year }}" \
+            --book-category "${{ inputs.book_category }}"
+
+      - name: Upload bilingual JSON as artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilingual-json-${{ inputs.slug }}
+          path: library/${{ inputs.slug }}/${{ inputs.slug }}.json
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Commit results to repository
         run: |

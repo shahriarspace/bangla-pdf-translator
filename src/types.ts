@@ -22,6 +22,7 @@ export interface BookEntry {
     translated_adoc?: string;
     translated_html?: string;
     translated_pdf?: string;
+    bilingual_json?: string;
   };
 }
 

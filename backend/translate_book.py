@@ -51,6 +51,9 @@ from src.generator import (
     asciidoc_to_html,
     asciidoc_to_pdf,
     BookMetadata,
+    BilingualMetadata,
+    generate_bilingual_json,
+    save_bilingual_json,
 )
 
 logging.basicConfig(
@@ -94,6 +97,9 @@ def update_catalog_entry(
     files: dict | None = None,
     title: str = "",
     author: str = "",
+    title_bangla: str = "",
+    author_bangla: str = "",
+    category: str = "",
 ) -> None:
     """Add or update a book entry in the catalog."""
     catalog = load_catalog()
@@ -123,6 +129,12 @@ def update_catalog_entry(
 
     if author:
         entry["author"] = author
+    if title_bangla:
+        entry["title_bangla"] = title_bangla
+    if author_bangla:
+        entry["author_bangla"] = author_bangla
+    if category:
+        entry["category"] = category
     if page_count:
         entry["page_count"] = page_count
     if translation_mode:
@@ -432,6 +444,20 @@ def _extract_metadata_via_ocr(doc) -> dict:
     return result
 
 
+def _slugify_author(name: str) -> str:
+    """Convert an author name to a URL-friendly slug.
+
+    E.g. "Humayun Ahmed" → "humayun-ahmed"
+    """
+    if not name:
+        return ""
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Translate a Bangla PDF to English")
     parser.add_argument(
@@ -465,6 +491,38 @@ def main():
         "--book-author",
         default="",
         help="Book author (optional, extracted from PDF if not provided)",
+    )
+    parser.add_argument(
+        "--export-bilingual-json",
+        action="store_true",
+        default=True,
+        help="Generate a bangla-library-compatible bilingual JSON file (default: on)",
+    )
+    parser.add_argument(
+        "--no-bilingual-json",
+        action="store_true",
+        default=False,
+        help="Skip bilingual JSON generation",
+    )
+    parser.add_argument(
+        "--book-title-bn",
+        default="",
+        help="Book title in Bangla (for bilingual JSON export)",
+    )
+    parser.add_argument(
+        "--book-author-bn",
+        default="",
+        help="Book author in Bangla (for bilingual JSON export)",
+    )
+    parser.add_argument(
+        "--book-year",
+        default="",
+        help="Book publication year (for bilingual JSON export)",
+    )
+    parser.add_argument(
+        "--book-category",
+        default="Novel",
+        help="Book category (for bilingual JSON export, default: Novel)",
     )
     args = parser.parse_args()
 
@@ -535,6 +593,16 @@ def main():
             {"page_number": r.page_number, "text": r.final_text} for r in results
         ]
 
+        # Also build bilingual page data (Bangla + English) for JSON export
+        bilingual_pages = [
+            {
+                "page_number": r.page_number,
+                "original_text": r.original_text,
+                "translated_text": r.final_text,
+            }
+            for r in results
+        ]
+
         stem = Path(args.filename).stem
         metadata = BookMetadata(
             title=book_title,
@@ -573,6 +641,51 @@ def main():
         if pdf_filename:
             files["translated_pdf"] = pdf_filename
 
+        # Step 4: Generate bilingual JSON for bangla-library (if enabled)
+        bilingual_json_filename = ""
+        bn_title = args.book_title_bn
+        bn_author = args.book_author_bn
+        if args.export_bilingual_json and not args.no_bilingual_json:
+            print("\n=== Step 4: Generating bilingual JSON for bangla-library ===")
+
+            # Use Bangla title/author from metadata extraction or CLI args
+            # The extracted metadata may be in Bangla (if the PDF has proper Unicode)
+            bn_title = args.book_title_bn or pdf_meta.get("title", "")
+            bn_author = args.book_author_bn or pdf_meta.get("author", "")
+
+            # If the extracted title/author look like Bangla, use them for _bn fields
+            # and use the English versions for _en fields
+            if bn_title and not _has_bangla_unicode(bn_title):
+                # Metadata was in English/Latin, not Bangla — clear the bn field
+                bn_title = ""
+            if bn_author and not _has_bangla_unicode(bn_author):
+                bn_author = ""
+
+            bilingual_meta = BilingualMetadata(
+                title_bn=bn_title,
+                title_en=book_title,
+                author_bn=bn_author,
+                author_en=book_author or "Unknown Author",
+                author_slug=_slugify_author(book_author) if book_author else "",
+                year=args.book_year,
+                category=args.book_category,
+                copyright_notice=(
+                    f"This work may be under copyright. "
+                    f"This translation is provided for educational purposes only."
+                ),
+            )
+
+            bilingual_json = generate_bilingual_json(bilingual_pages, bilingual_meta)
+            bilingual_json_filename = f"{slug}.json"
+            bilingual_json_path = save_bilingual_json(
+                bilingual_json, book_dir / bilingual_json_filename
+            )
+            print(
+                f"  Bilingual JSON: {bilingual_json_path} "
+                f"({len(bilingual_json['paragraphs'])} paragraphs)"
+            )
+            files["bilingual_json"] = bilingual_json_filename
+
         update_catalog_entry(
             slug=slug,
             filename=args.filename,
@@ -584,6 +697,13 @@ def main():
             files=files,
             title=book_title,
             author=book_author,
+            title_bangla=bn_title
+            if args.export_bilingual_json and not args.no_bilingual_json
+            else args.book_title_bn,
+            author_bangla=bn_author
+            if args.export_bilingual_json and not args.no_bilingual_json
+            else args.book_author_bn,
+            category=args.book_category,
         )
 
         print(f"\n=== Done! Book '{slug}' translated successfully ===")

@@ -1,15 +1,18 @@
 """
-AsciiDoc Generator Module
+Generator Module
 
-Converts translated pages into AsciiDoc format.
-AsciiDoc can then be exported to HTML or PDF using asciidoctor.
+Converts translated pages into various output formats:
+- AsciiDoc (→ HTML, PDF via asciidoctor or Python fallback)
+- Bilingual JSON for bangla-library (Astro content collection format)
 """
 
+import json
 import logging
+import re
 import subprocess
 import shutil
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,28 @@ class BookMetadata:
     title: str
     author: str = "Translated from Bangla"
     subtitle: str = ""
+
+
+@dataclass
+class BilingualMetadata:
+    """Metadata for bangla-library bilingual JSON export.
+
+    Maps to the Astro content collection schema in bangla-library's
+    src/content/config.ts.
+    """
+
+    title_bn: str = ""
+    title_en: str = ""
+    author_bn: str = ""
+    author_en: str = ""
+    author_slug: str = ""
+    year: str = ""
+    category: str = "Novel"
+    description_en: str = ""
+    description_bn: str = ""
+    copyright_notice: str = ""
+    status: str = "published"
+    published_date: str = ""  # ISO date string, e.g. "2026-03-17"
 
 
 def generate_asciidoc(
@@ -382,3 +407,161 @@ def _fallback_adoc_to_pdf(adoc_content: str, pdf_path: Path):
     if elements:
         doc.build(elements)
     logger.info(f"PDF generated via ReportLab: {pdf_path}")
+
+
+# ── Bilingual JSON for bangla-library ─────────────────────────────────────
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Split text into paragraphs on double-newlines.
+
+    Filters out empty paragraphs and strips whitespace.
+    Single newlines within a paragraph are preserved (the content
+    may contain intentional line breaks within a passage).
+    """
+    # Normalise various line ending styles
+    text = text.replace("\r\n", "\n")
+    # Split on two or more consecutive newlines
+    parts = re.split(r"\n{2,}", text)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _align_paragraphs(
+    bn_paragraphs: list[str],
+    en_paragraphs: list[str],
+) -> list[tuple[str, str]]:
+    """Pair up Bangla and English paragraphs.
+
+    If paragraph counts match, pairs are 1:1.
+    If they don't match (AI sometimes merges/splits paragraphs),
+    falls back to joining all paragraphs into a single pair.
+    """
+    if len(bn_paragraphs) == len(en_paragraphs):
+        return list(zip(bn_paragraphs, en_paragraphs))
+
+    # Small mismatch (within 20% or <=2 difference): try best-effort 1:1
+    # by padding the shorter list with empty strings
+    diff = abs(len(bn_paragraphs) - len(en_paragraphs))
+    max_len = max(len(bn_paragraphs), len(en_paragraphs))
+    if diff <= 2 or (max_len > 0 and diff / max_len <= 0.2):
+        # Pad shorter list
+        bn_padded = bn_paragraphs + [""] * (max_len - len(bn_paragraphs))
+        en_padded = en_paragraphs + [""] * (max_len - len(en_paragraphs))
+        return list(zip(bn_padded, en_padded))
+
+    # Large mismatch: join all into one paragraph pair
+    logger.warning(
+        f"Paragraph count mismatch (bn={len(bn_paragraphs)}, "
+        f"en={len(en_paragraphs)}), merging into single pair"
+    )
+    return [("\n\n".join(bn_paragraphs), "\n\n".join(en_paragraphs))]
+
+
+def generate_bilingual_json(
+    bilingual_pages: list[dict],
+    metadata: BilingualMetadata | None = None,
+) -> dict:
+    """Generate a bangla-library-compatible JSON structure.
+
+    Args:
+        bilingual_pages: List of dicts with keys:
+            - page_number (int)
+            - original_text (str) — Bangla source text
+            - translated_text (str) — English translation
+        metadata: Optional bilingual metadata for the book.
+
+    Returns:
+        A dict matching bangla-library's book JSON schema:
+        {
+            title_bn, title_en, author_bn, author_en, author_slug,
+            year, category, paragraphs: [{id, bn, en}, ...]
+        }
+    """
+    if metadata is None:
+        metadata = BilingualMetadata()
+
+    from datetime import date
+
+    paragraphs: list[dict] = []
+    para_id = 1
+
+    for page in bilingual_pages:
+        bn_text = page.get("original_text", "").strip()
+        en_text = page.get("translated_text", "").strip()
+
+        if not bn_text and not en_text:
+            continue
+
+        # Split each page into paragraph-level pairs
+        bn_paras = _split_paragraphs(bn_text) if bn_text else []
+        en_paras = _split_paragraphs(en_text) if en_text else []
+
+        if not bn_paras and not en_paras:
+            continue
+
+        # Handle edge cases: one side empty
+        if not bn_paras:
+            bn_paras = [""] * len(en_paras)
+        if not en_paras:
+            en_paras = [""] * len(bn_paras)
+
+        pairs = _align_paragraphs(bn_paras, en_paras)
+        for bn, en in pairs:
+            if bn.strip() or en.strip():
+                paragraphs.append({"id": para_id, "bn": bn, "en": en})
+                para_id += 1
+
+    # Build the book JSON
+    book_json: dict = {
+        "title_bn": metadata.title_bn,
+        "title_en": metadata.title_en,
+        "author_bn": metadata.author_bn,
+        "author_en": metadata.author_en,
+    }
+
+    if metadata.author_slug:
+        book_json["author_slug"] = metadata.author_slug
+
+    book_json["year"] = metadata.year or str(date.today().year)
+    book_json["published_date"] = metadata.published_date or date.today().isoformat()
+    book_json["status"] = metadata.status
+    book_json["category"] = metadata.category
+
+    if metadata.description_en:
+        book_json["description_en"] = metadata.description_en
+    if metadata.description_bn:
+        book_json["description_bn"] = metadata.description_bn
+    if metadata.copyright_notice:
+        book_json["copyright_notice"] = metadata.copyright_notice
+
+    book_json["paragraphs"] = paragraphs
+
+    return book_json
+
+
+def save_bilingual_json(
+    book_json: dict,
+    output_path: str | Path,
+) -> Path:
+    """Save the bilingual JSON to a file.
+
+    Args:
+        book_json: The book dict from generate_bilingual_json().
+        output_path: Path to write the JSON file.
+
+    Returns:
+        The Path object of the saved file.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(book_json, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    para_count = len(book_json.get("paragraphs", []))
+    size_kb = output_path.stat().st_size / 1024
+    logger.info(
+        f"Bilingual JSON saved: {output_path} "
+        f"({para_count} paragraphs, {size_kb:.1f} KB)"
+    )
+    return output_path

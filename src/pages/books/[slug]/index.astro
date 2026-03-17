@@ -131,6 +131,16 @@ if (isTranslated && book.files?.translated_html) {
                 Original PDF
               </a>
             )}
+            {book.files?.bilingual_json && (
+              <a
+                href={`${base}library/${book.slug}/${book.files.bilingual_json}`}
+                class="btn btn-outline"
+                download
+                title="Bilingual JSON for bangla-library — contains paragraph-by-paragraph Bangla/English pairs"
+              >
+                Bilingual JSON
+              </a>
+            )}
           </div>
           {htmlContent && (
             <a href={`${base}books/${book.slug}/read/`} class="btn btn-green read-btn">

@@ -49,6 +49,10 @@
   // Book metadata (optional)
   let bookTitle = $state('');
   let bookAuthor = $state('');
+  let bookTitleBn = $state('');
+  let bookAuthorBn = $state('');
+  let bookYear = $state('');
+  let bookCategory = $state('Novel');
 
   // Auth state
   let githubToken = $state('');
@@ -570,6 +574,10 @@
               ai_translate_model: translationMode === 'ai' ? aiTranslateModel : 'gpt-4o',
               book_title: bookTitle.trim(),
               book_author: bookAuthor.trim(),
+              book_title_bn: bookTitleBn.trim(),
+              book_author_bn: bookAuthorBn.trim(),
+              book_year: bookYear.trim(),
+              book_category: bookCategory,
             },
           }),
         }
@@ -778,12 +786,41 @@
       <p class="help-text">If left blank, the title and author will be extracted from the PDF metadata or derived from the filename.</p>
       <div class="form-row">
         <label>
-          <span>Book Title</span>
+          <span>Book Title (English)</span>
           <input type="text" bind:value={bookTitle} placeholder="e.g. Moyurakkhi" />
         </label>
         <label>
-          <span>Author</span>
+          <span>Author (English)</span>
           <input type="text" bind:value={bookAuthor} placeholder="e.g. Humayun Ahmed" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Book Title (Bangla)</span>
+          <input type="text" bind:value={bookTitleBn} placeholder="e.g. ময়ূরাক্ষী" />
+        </label>
+        <label>
+          <span>Author (Bangla)</span>
+          <input type="text" bind:value={bookAuthorBn} placeholder="e.g. হুমায়ূন আহমেদ" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>Year of Publication</span>
+          <input type="text" bind:value={bookYear} placeholder="e.g. 1990" />
+        </label>
+        <label>
+          <span>Category</span>
+          <select bind:value={bookCategory} class="select">
+            <option value="Novel">Novel</option>
+            <option value="Poetry">Poetry</option>
+            <option value="Short Story">Short Story</option>
+            <option value="Essay">Essay</option>
+            <option value="Non-fiction">Non-fiction</option>
+            <option value="Drama">Drama</option>
+            <option value="Children">Children's Literature</option>
+            <option value="Other">Other</option>
+          </select>
         </label>
       </div>
     </div>
