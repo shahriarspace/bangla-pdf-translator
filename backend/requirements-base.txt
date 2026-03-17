@@ -1,0 +1,21 @@
+# Base requirements for CI (always installed)
+# This is the minimal set needed by translate_book.py regardless of mode.
+
+# PDF processing
+PyMuPDF>=1.23.0
+Pillow>=10.0.0
+
+# OCR (pytesseract is lightweight — the heavy part is the system package)
+pytesseract>=0.3.10
+
+# Online translation (Google Translate via deep-translator)
+deep-translator>=1.11.4
+
+# AI translation / refinement (OpenAI SDK — lightweight, ~2 MB)
+openai>=1.0.0
+
+# PDF generation from AsciiDoc (Python-based fallback)
+reportlab>=4.0.0
+
+# Utilities
+python-dotenv>=1.0.0

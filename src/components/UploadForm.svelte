@@ -37,9 +37,9 @@
   let errorMsg = $state('');
   let submittedSlug = $state('');
 
-  // Translation options
-  let translationMode = $state('offline');
-  let ocrEngine = $state('tesseract');
+  // Translation options (defaults: AI = best quality + lightest install)
+  let translationMode = $state('ai');
+  let ocrEngine = $state('ai');
   let refinementProvider = $state('none');
   let refinementModel = $state('gpt-4o-mini');
   let aiProvider = $state('github');

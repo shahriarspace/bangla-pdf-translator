@@ -1,0 +1,5 @@
+# Offline/hybrid translation requirements
+# Only install when translation_mode is 'offline' or 'hybrid'.
+# argostranslate pulls in stanza and torch (~350 MB total).
+
+argostranslate>=1.9.0

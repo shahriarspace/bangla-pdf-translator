@@ -2,11 +2,16 @@
 #
 # This workflow:
 # 1. Downloads a Bangla PDF committed to uploads/{slug}/ in the repo
-# 2. Installs OCR (Tesseract) and translation tools (Argos Translate)
-# 3. Runs the translation pipeline (extract → translate → generate)
+# 2. Conditionally installs dependencies based on chosen OCR/translation mode
+# 3. Runs the translation pipeline (extract -> translate -> generate)
 # 4. Commits results to library/{slug}/ and updates catalog.json
 # 5. Cleans up the uploaded PDF from uploads/
 # 6. Triggers the deploy workflow to rebuild the Astro site
+#
+# Dependency weight by mode:
+#   AI OCR + AI translation (best quality): ~55 MB  (<1 min install)
+#   Online translation (Google):            ~75 MB  (<1 min install)
+#   Offline/hybrid translation (Argos):    ~700 MB  (~4 min install)
 
 name: Translate Book
 
@@ -26,14 +31,14 @@ on:
         required: true
         type: string
       translation_mode:
-        description: 'Translation engine: offline (Argos), online (Google), or ai (literary AI)'
+        description: 'Translation engine: offline (Argos), online (Google), hybrid, or ai (literary AI)'
         required: false
-        default: 'offline'
+        default: 'ai'
         type: string
       ocr_engine:
         description: 'OCR engine: tesseract (offline) or ai (vision model)'
         required: false
-        default: 'tesseract'
+        default: 'ai'
         type: string
       refinement_provider:
         description: 'AI refinement: none, github, or openai'
@@ -70,6 +75,11 @@ on:
         required: false
         default: ''
         type: string
+      use_asciidoctor:
+        description: 'Use Ruby asciidoctor for HTML/PDF (false = use Python fallback, lighter)'
+        required: false
+        default: 'false'
+        type: string
 
 permissions:
   contents: write
@@ -90,26 +100,49 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install system dependencies
+      - name: Show configuration
+        run: |
+          echo "=== Translation Configuration ==="
+          echo "OCR Engine:         ${{ inputs.ocr_engine }}"
+          echo "Translation Mode:   ${{ inputs.translation_mode }}"
+          echo "AI Provider:        ${{ inputs.ai_provider }}"
+          echo "Refinement:         ${{ inputs.refinement_provider }}"
+          echo "Use Asciidoctor:    ${{ inputs.use_asciidoctor }}"
+          echo "================================="
+
+      # --- Conditional: Tesseract (only for tesseract OCR) ---
+      - name: Install Tesseract OCR
+        if: inputs.ocr_engine == 'tesseract'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             tesseract-ocr \
             tesseract-ocr-ben \
-            tesseract-ocr-eng \
-            ruby
-          # Install asciidoctor for HTML/PDF generation
-          sudo gem install asciidoctor asciidoctor-pdf --no-document
-          # Verify
+            tesseract-ocr-eng
           tesseract --version
           tesseract --list-langs
+
+      # --- Conditional: Ruby + Asciidoctor (only when explicitly requested) ---
+      - name: Install Ruby and Asciidoctor
+        if: inputs.use_asciidoctor == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ruby
+          sudo gem install asciidoctor asciidoctor-pdf --no-document
           asciidoctor --version
 
+      # --- Always: Base Python dependencies ---
+      - name: Install base Python dependencies
+        run: pip install -r backend/requirements-base.txt
+
+      # --- Conditional: PyTorch + Argos (only for offline/hybrid translation) ---
       - name: Install CPU-only PyTorch
+        if: inputs.translation_mode == 'offline' || inputs.translation_mode == 'hybrid'
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install Python dependencies
-        run: pip install -r backend/requirements.txt
+      - name: Install Argos Translate
+        if: inputs.translation_mode == 'offline' || inputs.translation_mode == 'hybrid'
+        run: pip install -r backend/requirements-offline.txt
 
       - name: Download and install Argos Translate model
         if: inputs.translation_mode == 'offline' || inputs.translation_mode == 'hybrid'
