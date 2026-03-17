@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../../../layouts/BaseLayout.astro';
+import DeleteBook from '../../../components/DeleteBook.svelte';
 import type { Catalog, BookEntry } from '../../../types';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -139,6 +140,8 @@ if (isTranslated && book.files?.translated_html) {
         </div>
       )}
     </div>
+
+    <DeleteBook slug={book.slug} bookTitle={book.title} client:load />
   </div>
 </BaseLayout>
 

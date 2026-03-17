@@ -1,0 +1,82 @@
+# delete-book.yml — Delete a book from the library
+#
+# Fallback workflow for when client-side deletion fails (e.g. too many files).
+# Removes the book's directory from library/{slug}/, updates catalog.json,
+# and triggers a site rebuild.
+
+name: Delete Book
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Book slug to delete (directory name in library/)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  delete:
+    name: Delete Book
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Delete book files and update catalog
+        run: |
+          SLUG="${{ inputs.slug }}"
+          echo "Deleting book: $SLUG"
+
+          # Remove book directory
+          if [ -d "library/$SLUG" ]; then
+            rm -rf "library/$SLUG"
+            echo "Removed library/$SLUG/"
+          else
+            echo "Warning: library/$SLUG/ does not exist"
+          fi
+
+          # Also remove any leftover uploads
+          if [ -d "uploads/$SLUG" ]; then
+            rm -rf "uploads/$SLUG"
+            echo "Removed uploads/$SLUG/"
+          fi
+
+          # Update catalog.json — remove the entry for this slug
+          if [ -f "library/catalog.json" ]; then
+            python3 -c "
+          import json
+          from pathlib import Path
+
+          catalog_path = Path('library/catalog.json')
+          catalog = json.loads(catalog_path.read_text())
+          original_count = len(catalog['books'])
+          catalog['books'] = [b for b in catalog['books'] if b['slug'] != '$SLUG']
+          removed = original_count - len(catalog['books'])
+          catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + '\n')
+          print(f'Removed {removed} entry/entries for $SLUG from catalog')
+          "
+          fi
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Delete book: ${{ inputs.slug }}"
+          git push
+
+      - name: Trigger site rebuild
+        if: success()
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches" \
+            -d '{"ref":"main"}'
