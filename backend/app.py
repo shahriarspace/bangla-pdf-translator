@@ -32,6 +32,7 @@ from src.generator import (
     asciidoc_to_html,
     asciidoc_to_pdf,
     BookMetadata,
+    build_bilingual_output,
 )
 
 logging.basicConfig(
@@ -272,6 +273,7 @@ async def job_progress(job_id: str):
                         "adoc": f"/api/jobs/{job_id}/download/adoc",
                         "html": f"/api/jobs/{job_id}/download/html",
                         "pdf": f"/api/jobs/{job_id}/download/pdf",
+                        "json": f"/api/jobs/{job_id}/download/json",
                     }
                 yield {"event": "complete", "data": json.dumps(final)}
                 break
@@ -335,6 +337,10 @@ async def download_file(job_id: str, fmt: str):
         path = job["pdf_out_path"]
         media_type = "application/pdf"
         filename = f"{stem}_english.pdf"
+    elif fmt == "json":
+        path = job.get("bilingual_json_path")
+        media_type = "application/json"
+        filename = f"{stem}_bilingual.json"
     else:
         raise HTTPException(status_code=400, detail=f"Unknown format: {fmt}")
 
@@ -381,6 +387,13 @@ def _build_zip(job_id: str) -> Path:
         pdf_out = Path(job["pdf_out_path"])
         if pdf_out.exists():
             zf.write(pdf_out, f"translated/{stem}_english.pdf")
+
+        # Bilingual JSON
+        bilingual = job.get("bilingual_json_path")
+        if bilingual:
+            bilingual_path = Path(bilingual)
+            if bilingual_path.exists():
+                zf.write(bilingual_path, f"translated/{bilingual_path.name}")
 
     logger.info(
         f"ZIP bundle created: {zip_path} ({zip_path.stat().st_size / 1024:.1f} KB)"
@@ -470,6 +483,18 @@ async def _process_job(job_id: str):
         job["html_path"] = str(html_path) if html_path else None
         job["pdf_out_path"] = str(pdf_out_path) if pdf_out_path else None
         job["adoc_content"] = adoc_content
+
+        # Generate bilingual JSON (Bangla + English paragraph pairs)
+        job["current_step"] = "Generating bilingual JSON..."
+        title = book.title.replace("_", " ").title()
+        slug = book.title.lower().replace(" ", "-").replace("_", "-")
+        bilingual_json_path, _ = build_bilingual_output(
+            translation_results=results,
+            output_dir=job_dir,
+            slug=slug,
+            title_en=title,
+        )
+        job["bilingual_json_path"] = str(bilingual_json_path)
 
         zip_path = _build_zip(job_id)
         job["zip_path"] = str(zip_path)

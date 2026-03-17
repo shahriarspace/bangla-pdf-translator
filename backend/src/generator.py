@@ -2,7 +2,7 @@
 Generator Module
 
 Converts translated pages into various output formats:
-- AsciiDoc (→ HTML, PDF via asciidoctor or Python fallback)
+- AsciiDoc (-> HTML, PDF via asciidoctor or Python fallback)
 - Bilingual JSON for bangla-library (Astro content collection format)
 """
 
@@ -15,6 +15,32 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Text utilities (shared across Docker app + CLI)
+# ---------------------------------------------------------------------------
+
+
+def has_bangla_unicode(text: str) -> bool:
+    """Check if text contains any Bangla Unicode characters (U+0980-U+09FF)."""
+    if not text:
+        return False
+    return any("\u0980" <= c <= "\u09ff" for c in text)
+
+
+def slugify_author(name: str) -> str:
+    """Convert an author name to a URL-friendly slug.
+
+    E.g. "Humayun Ahmed" -> "humayun-ahmed"
+    """
+    if not name:
+        return ""
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")
 
 
 @dataclass
@@ -565,3 +591,81 @@ def save_bilingual_json(
         f"({para_count} paragraphs, {size_kb:.1f} KB)"
     )
     return output_path
+
+
+def build_bilingual_output(
+    translation_results: list,
+    output_dir: str | Path,
+    slug: str,
+    *,
+    title_en: str = "",
+    author_en: str = "",
+    title_bn: str = "",
+    author_bn: str = "",
+    year: str = "",
+    category: str = "Novel",
+    pdf_meta: dict | None = None,
+) -> tuple[Path, dict]:
+    """High-level helper: build bilingual JSON from translation results.
+
+    Handles Bangla Unicode validation, author slugification, metadata
+    assembly, paragraph alignment, and file saving.  Used by both
+    the Docker FastAPI app and the CLI translate_book.py.
+
+    Args:
+        translation_results: List of objects with ``page_number``,
+            ``original_text``, and ``final_text`` attributes.
+        output_dir: Directory to write ``{slug}.json`` into.
+        slug: URL-safe book identifier.
+        title_en: English title (falls back to slug if empty).
+        author_en: English author name.
+        title_bn: Bangla title override.  If empty, tries ``pdf_meta['title']``
+            and validates it contains Bangla Unicode.
+        author_bn: Bangla author override.  Same fallback logic.
+        year: Publication year string.
+        category: Book category for bangla-library.
+        pdf_meta: Optional dict from ``extract_pdf_metadata()``; used as
+            fallback for Bangla title/author.
+
+    Returns:
+        A tuple of (json_path, book_json_dict).
+    """
+    pdf_meta = pdf_meta or {}
+
+    # Resolve Bangla title/author: CLI/form value -> PDF metadata -> empty
+    bn_title = title_bn or pdf_meta.get("title", "")
+    bn_author = author_bn or pdf_meta.get("author", "")
+
+    # Only keep values that actually contain Bangla characters
+    if bn_title and not has_bangla_unicode(bn_title):
+        bn_title = ""
+    if bn_author and not has_bangla_unicode(bn_author):
+        bn_author = ""
+
+    bilingual_pages = [
+        {
+            "page_number": r.page_number,
+            "original_text": r.original_text,
+            "translated_text": r.final_text,
+        }
+        for r in translation_results
+    ]
+
+    meta = BilingualMetadata(
+        title_bn=bn_title,
+        title_en=title_en or slug.replace("-", " ").title(),
+        author_bn=bn_author,
+        author_en=author_en or "Unknown Author",
+        author_slug=slugify_author(author_en) if author_en else "",
+        year=year,
+        category=category,
+        copyright_notice=(
+            "This work may be under copyright. "
+            "This translation is provided for educational purposes only."
+        ),
+    )
+
+    book_json = generate_bilingual_json(bilingual_pages, meta)
+    json_path = save_bilingual_json(book_json, Path(output_dir) / f"{slug}.json")
+
+    return json_path, book_json

@@ -51,9 +51,9 @@ from src.generator import (
     asciidoc_to_html,
     asciidoc_to_pdf,
     BookMetadata,
-    BilingualMetadata,
-    generate_bilingual_json,
-    save_bilingual_json,
+    build_bilingual_output,
+    has_bangla_unicode,
+    slugify_author,
 )
 
 logging.basicConfig(
@@ -157,10 +157,12 @@ def progress_callback(current: int, total: int, msg: str) -> None:
 
 
 def _has_bangla_unicode(text: str) -> bool:
-    """Check if text contains any Bangla Unicode characters (U+0980–U+09FF)."""
-    if not text:
-        return False
-    return any("\u0980" <= c <= "\u09ff" for c in text)
+    """Check if text contains any Bangla Unicode characters (U+0980-U+09FF).
+
+    Delegates to ``generator.has_bangla_unicode`` — kept here as a thin
+    wrapper so call-sites inside this module remain unchanged.
+    """
+    return has_bangla_unicode(text)
 
 
 def _is_plausible_english(text: str) -> bool:
@@ -447,15 +449,9 @@ def _extract_metadata_via_ocr(doc) -> dict:
 def _slugify_author(name: str) -> str:
     """Convert an author name to a URL-friendly slug.
 
-    E.g. "Humayun Ahmed" → "humayun-ahmed"
+    Delegates to ``generator.slugify_author``.
     """
-    if not name:
-        return ""
-    slug = name.lower().strip()
-    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
-    slug = re.sub(r"[\s_]+", "-", slug)
-    slug = re.sub(r"-+", "-", slug)
-    return slug.strip("-")
+    return slugify_author(name)
 
 
 def main():
@@ -593,16 +589,6 @@ def main():
             {"page_number": r.page_number, "text": r.final_text} for r in results
         ]
 
-        # Also build bilingual page data (Bangla + English) for JSON export
-        bilingual_pages = [
-            {
-                "page_number": r.page_number,
-                "original_text": r.original_text,
-                "translated_text": r.final_text,
-            }
-            for r in results
-        ]
-
         stem = Path(args.filename).stem
         metadata = BookMetadata(
             title=book_title,
@@ -648,38 +634,21 @@ def main():
         if args.export_bilingual_json and not args.no_bilingual_json:
             print("\n=== Step 4: Generating bilingual JSON for bangla-library ===")
 
-            # Use Bangla title/author from metadata extraction or CLI args
-            # The extracted metadata may be in Bangla (if the PDF has proper Unicode)
-            bn_title = args.book_title_bn or pdf_meta.get("title", "")
-            bn_author = args.book_author_bn or pdf_meta.get("author", "")
-
-            # If the extracted title/author look like Bangla, use them for _bn fields
-            # and use the English versions for _en fields
-            if bn_title and not _has_bangla_unicode(bn_title):
-                # Metadata was in English/Latin, not Bangla — clear the bn field
-                bn_title = ""
-            if bn_author and not _has_bangla_unicode(bn_author):
-                bn_author = ""
-
-            bilingual_meta = BilingualMetadata(
-                title_bn=bn_title,
+            bilingual_json_path, bilingual_json = build_bilingual_output(
+                translation_results=results,
+                output_dir=book_dir,
+                slug=slug,
                 title_en=book_title,
-                author_bn=bn_author,
-                author_en=book_author or "Unknown Author",
-                author_slug=_slugify_author(book_author) if book_author else "",
+                author_en=book_author,
+                title_bn=args.book_title_bn,
+                author_bn=args.book_author_bn,
                 year=args.book_year,
                 category=args.book_category,
-                copyright_notice=(
-                    f"This work may be under copyright. "
-                    f"This translation is provided for educational purposes only."
-                ),
+                pdf_meta=pdf_meta,
             )
-
-            bilingual_json = generate_bilingual_json(bilingual_pages, bilingual_meta)
             bilingual_json_filename = f"{slug}.json"
-            bilingual_json_path = save_bilingual_json(
-                bilingual_json, book_dir / bilingual_json_filename
-            )
+            bn_title = bilingual_json.get("title_bn", args.book_title_bn)
+            bn_author = bilingual_json.get("author_bn", args.book_author_bn)
             print(
                 f"  Bilingual JSON: {bilingual_json_path} "
                 f"({len(bilingual_json['paragraphs'])} paragraphs)"
