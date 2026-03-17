@@ -1,22 +1,6 @@
 {
   "books": [
     {
-      "slug": "megher-upor-bari-by-humayun-ahmed",
-      "title": "ˆgGNi Ici evwo",
-      "status": "translated",
-      "date_added": "2026-03-17T13:46:23.239030+00:00",
-      "author": "DcbÅvm",
-      "page_count": 23,
-      "translation_mode": "online",
-      "date_translated": "2026-03-17T13:47:30.367963+00:00",
-      "files": {
-        "original_pdf": "Megher Upor Bari By Humayun Ahmed.pdf",
-        "translated_adoc": "Megher Upor Bari By Humayun Ahmed_english.adoc",
-        "translated_html": "Megher Upor Bari By Humayun Ahmed_english.html",
-        "translated_pdf": "Megher Upor Bari By Humayun Ahmed_english.pdf"
-      }
-    },
-    {
       "slug": "eki-kando-by-humayun-ahmed",
       "title": "Eki Kando! By Humayun Ahmed",
       "status": "translated",
