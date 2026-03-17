@@ -144,14 +144,21 @@ def progress_callback(current: int, total: int, msg: str) -> None:
 
 
 def extract_pdf_metadata(pdf_path: Path) -> dict:
-    """Extract title and author from PDF metadata fields."""
+    """
+    Extract title and author from a PDF using a three-level fallback chain:
+      1. PDF embedded metadata fields (fast, works if publisher set them)
+      2. PyMuPDF text extraction with font-size heuristics on first pages
+         (works for text-based PDFs — largest font = title, second = author)
+      3. Tesseract OCR on the cover page (works for scanned PDFs)
+    """
     metadata = {"title": "", "author": ""}
+
+    # --- Level 1: PDF embedded metadata ---
     try:
         import fitz  # PyMuPDF
 
         doc = fitz.open(str(pdf_path))
         pdf_meta = doc.metadata or {}
-        doc.close()
 
         title = (pdf_meta.get("title") or "").strip()
         author = (pdf_meta.get("author") or "").strip()
@@ -162,11 +169,217 @@ def extract_pdf_metadata(pdf_path: Path) -> dict:
         if author and len(author) > 1:
             metadata["author"] = author
 
-        logger.info(f"PDF metadata — title: {title!r}, author: {author!r}")
+        logger.info(f"PDF metadata (level 1) — title: {title!r}, author: {author!r}")
+
+        # --- Level 2: Font-size heuristics on first pages ---
+        if not metadata["title"]:
+            logger.info(
+                "Level 1 metadata empty, trying font-size heuristics (level 2)..."
+            )
+            l2 = _extract_metadata_from_text(doc)
+            if l2["title"]:
+                metadata["title"] = l2["title"]
+                logger.info(f"Level 2 found title: {l2['title']!r}")
+            if l2["author"] and not metadata["author"]:
+                metadata["author"] = l2["author"]
+                logger.info(f"Level 2 found author: {l2['author']!r}")
+
+        # --- Level 3: Tesseract OCR on cover page ---
+        if not metadata["title"]:
+            logger.info("Level 2 empty, trying Tesseract OCR on cover (level 3)...")
+            l3 = _extract_metadata_via_ocr(doc)
+            if l3["title"]:
+                metadata["title"] = l3["title"]
+                logger.info(f"Level 3 found title: {l3['title']!r}")
+            if l3["author"] and not metadata["author"]:
+                metadata["author"] = l3["author"]
+                logger.info(f"Level 3 found author: {l3['author']!r}")
+
+        doc.close()
     except Exception as e:
         logger.warning(f"Could not read PDF metadata: {e}")
 
     return metadata
+
+
+def _extract_metadata_from_text(doc) -> dict:
+    """
+    Level 2: Extract title/author by analysing font sizes on the first 3 pages.
+    The largest text span is likely the title; the second-largest (or text near
+    common Bangla author keywords) is likely the author.
+    """
+    import re
+
+    result = {"title": "", "author": ""}
+    try:
+        # Collect text spans with their font sizes from first 3 pages
+        spans_by_size: list[tuple[float, str]] = []
+        pages_to_check = min(3, len(doc))
+
+        for page_idx in range(pages_to_check):
+            page = doc[page_idx]
+            blocks = page.get_text("dict", flags=0)["blocks"]
+            for block in blocks:
+                if block.get("type") != 0:  # text blocks only
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        size = span.get("size", 0)
+                        if text and len(text) > 1:
+                            spans_by_size.append((size, text))
+
+        if not spans_by_size:
+            return result
+
+        # Sort by font size descending
+        spans_by_size.sort(key=lambda x: x[0], reverse=True)
+
+        # Largest font text = likely title
+        # Merge adjacent spans with the same (largest) font size
+        max_size = spans_by_size[0][0]
+        title_parts = [
+            text for size, text in spans_by_size if abs(size - max_size) < 0.5
+        ]
+        candidate_title = " ".join(title_parts).strip()
+
+        # Sanity check: title should be reasonable length and not just numbers/punctuation
+        if candidate_title and 2 <= len(candidate_title) <= 200:
+            result["title"] = candidate_title
+
+        # Look for author: common Bangla patterns or second-largest font
+        # Common Bangla author indicators: রচনা (written by), লেখক (author),
+        # by/By, or text right after the title
+        bangla_author_patterns = re.compile(
+            r"(রচনা\s*[:\-–—]?\s*|লেখক\s*[:\-–—]?\s*|রচনায়\s*[:\-–—]?\s*)(.*)",
+            re.UNICODE,
+        )
+
+        for _size, text in spans_by_size:
+            match = bangla_author_patterns.search(text)
+            if match:
+                author_name = match.group(2).strip()
+                if author_name and len(author_name) > 1:
+                    result["author"] = author_name
+                    break
+
+        # If no pattern match, try second-largest font size (common for author name)
+        if not result["author"] and len(spans_by_size) > 1:
+            sizes_seen = sorted(set(s for s, _ in spans_by_size), reverse=True)
+            if len(sizes_seen) >= 2:
+                second_size = sizes_seen[1]
+                author_parts = [
+                    text
+                    for size, text in spans_by_size
+                    if abs(size - second_size) < 0.5
+                ]
+                candidate_author = " ".join(author_parts).strip()
+                # Author names are typically short
+                if candidate_author and 2 <= len(candidate_author) <= 100:
+                    result["author"] = candidate_author
+
+    except Exception as e:
+        logger.debug(f"Font-size heuristics failed: {e}")
+
+    return result
+
+
+def _extract_metadata_via_ocr(doc) -> dict:
+    """
+    Level 3: OCR the cover page with Tesseract and apply heuristics.
+    Only runs if Tesseract is available on the system.
+    """
+    result = {"title": "", "author": ""}
+    try:
+        import subprocess
+
+        # Check if tesseract is available
+        tess_check = subprocess.run(
+            ["tesseract", "--version"],
+            capture_output=True,
+            timeout=5,
+        )
+        if tess_check.returncode != 0:
+            logger.debug("Tesseract not available, skipping OCR metadata extraction")
+            return result
+
+        from PIL import Image
+        import io
+
+        # Render cover page to image
+        page = doc[0]
+        # Use 2x zoom for better OCR accuracy
+        mat = page.get_pixmap(matrix=page.derotation_matrix, dpi=200)
+        img_data = mat.tobytes("png")
+        img = Image.open(io.BytesIO(img_data))
+
+        # OCR with Tesseract (Bangla + English)
+        import pytesseract
+
+        # Get text with per-line confidence using tsv output
+        ocr_data = pytesseract.image_to_data(
+            img, lang="ben+eng", output_type=pytesseract.Output.DICT
+        )
+
+        # Group text by approximate "block" — larger text on cover = title
+        # pytesseract data includes block_num, line_num, word_num, height, text
+        lines_info: list[tuple[float, str]] = []
+        current_line_texts: list[str] = []
+        current_line_height = 0.0
+        current_line_num = -1
+        current_block_num = -1
+
+        for i in range(len(ocr_data["text"])):
+            text = (ocr_data["text"][i] or "").strip()
+            block_num = ocr_data["block_num"][i]
+            line_num = ocr_data["line_num"][i]
+            height = ocr_data["height"][i]
+            conf = int(ocr_data["conf"][i]) if ocr_data["conf"][i] != "-1" else 0
+
+            if block_num != current_block_num or line_num != current_line_num:
+                # Save previous line
+                if current_line_texts:
+                    line_text = " ".join(current_line_texts).strip()
+                    if line_text:
+                        lines_info.append((current_line_height, line_text))
+                current_line_texts = []
+                current_line_height = 0
+                current_line_num = line_num
+                current_block_num = block_num
+
+            if text and conf > 30:  # filter low-confidence noise
+                current_line_texts.append(text)
+                current_line_height = max(current_line_height, height)
+
+        # Don't forget the last line
+        if current_line_texts:
+            line_text = " ".join(current_line_texts).strip()
+            if line_text:
+                lines_info.append((current_line_height, line_text))
+
+        if not lines_info:
+            return result
+
+        # Sort by height descending — tallest text = title
+        lines_info.sort(key=lambda x: x[0], reverse=True)
+
+        # Largest text = title
+        candidate_title = lines_info[0][1]
+        if candidate_title and 2 <= len(candidate_title) <= 200:
+            result["title"] = candidate_title
+
+        # Second largest = likely author
+        if len(lines_info) > 1:
+            candidate_author = lines_info[1][1]
+            if candidate_author and 2 <= len(candidate_author) <= 100:
+                result["author"] = candidate_author
+
+    except FileNotFoundError:
+        logger.debug("Tesseract binary not found, skipping OCR metadata extraction")
+    except Exception as e:
+        logger.debug(f"OCR metadata extraction failed: {e}")
+
+    return result
 
 
 def main():
