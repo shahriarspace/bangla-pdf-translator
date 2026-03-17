@@ -209,52 +209,87 @@ jobs:
           retention-days: 90
 
       - name: Commit results to repository
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          SLUG="${{ inputs.slug }}"
+          BOOK_DIR="library/${SLUG}"
+
           # Remove the uploaded PDF (no longer needed)
-          git rm -rf "uploads/${{ inputs.slug }}/" || true
-          git add "library/${{ inputs.slug }}/" "library/catalog.json"
-          git commit -m "Add translated book: ${{ inputs.slug }}"
+          git rm -rf "uploads/${SLUG}/" || true
+          git add "${BOOK_DIR}/" "library/catalog.json"
+          git commit -m "Add translated book: ${SLUG}"
 
           # Push with retry logic for concurrent translations.
-          # If another translation pushed while we were running, pull --rebase
-          # and retry. catalog.json conflicts are resolved by re-adding ours.
-          MAX_RETRIES=3
+          # Strategy: on conflict, abort rebase, fetch latest, build a fresh
+          # merge commit that combines our book files with the remote catalog.
+          MAX_RETRIES=5
           for i in $(seq 1 $MAX_RETRIES); do
-            if git push; then
+            if git push origin main; then
               echo "Push succeeded on attempt $i"
               break
             fi
-            echo "Push failed (attempt $i/$MAX_RETRIES), pulling with rebase..."
-            git pull --rebase origin main || {
-              # If rebase conflicts on catalog.json, accept ours and re-merge
-              echo "Rebase conflict detected, resolving catalog.json..."
-              git checkout --theirs library/catalog.json 2>/dev/null || true
-              git add library/catalog.json
-              git rebase --continue || true
-              # Re-run our catalog update to merge entries
-              python -c "
+
+            echo "Push failed (attempt $i/$MAX_RETRIES), resolving..."
+
+            # Clean up any in-progress rebase from a previous attempt
+            git rebase --abort 2>/dev/null || true
+
+            # Make sure we're on main (not detached HEAD)
+            git checkout main 2>/dev/null || true
+
+            # Save our catalog entry and book files
+            cp library/catalog.json /tmp/our_catalog.json
+
+            # Fetch latest remote state
+            git fetch origin main
+
+            # Reset to remote HEAD (keeps our book files in the working tree)
+            git reset --soft origin/main
+
+            # The book files are still staged from our commit.
+            # Re-stage everything to be safe.
+            git checkout HEAD -- library/catalog.json 2>/dev/null || true
+            git add "${BOOK_DIR}/" || true
+
+            # Merge catalog.json: start from remote version, add our book entry
+            python3 -c "
           import json
           from pathlib import Path
-          catalog_path = Path('library/catalog.json')
-          catalog = json.loads(catalog_path.read_text())
-          slugs_seen = set()
-          deduped = []
-          for book in catalog['books']:
-              if book['slug'] not in slugs_seen:
-                  slugs_seen.add(book['slug'])
-                  deduped.append(book)
-          catalog['books'] = deduped
-          catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + '\n')
+
+          # Load the remote catalog (current HEAD after reset)
+          remote_catalog = json.loads(Path('library/catalog.json').read_text())
+
+          # Load our catalog (saved before reset)
+          our_catalog = json.loads(Path('/tmp/our_catalog.json').read_text())
+
+          # Find our book entry
+          our_entry = next((b for b in our_catalog['books'] if b['slug'] == '${SLUG}'), None)
+
+          if our_entry:
+              # Remove any existing entry for this slug in remote catalog
+              remote_catalog['books'] = [b for b in remote_catalog['books'] if b['slug'] != '${SLUG}']
+              # Insert our entry at the front (newest first)
+              remote_catalog['books'].insert(0, our_entry)
+
+          Path('library/catalog.json').write_text(
+              json.dumps(remote_catalog, indent=2, ensure_ascii=False) + '\n'
+          )
           "
-              git add library/catalog.json
-              git commit --amend --no-edit
-            }
+
+            git add library/catalog.json
+            git commit -m "Add translated book: ${SLUG}"
+
             if [ "$i" -eq "$MAX_RETRIES" ]; then
               echo "Failed to push after $MAX_RETRIES attempts"
               exit 1
             fi
+
+            # Small delay to avoid rapid-fire conflicts with other workflows
+            sleep 2
           done
 
       - name: Trigger site rebuild
